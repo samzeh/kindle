@@ -1,0 +1,17 @@
+# Custom Kindle partition layout for 4MB flash, no SD card.
+#
+# Books, decompressed chapters and page indexes all live in internal flash,
+# so storage is sized as large as the part can give. The stock huge_app.csv
+# reserves 3MB for the application and leaves only 896KB of data; the reader
+# builds to ~1.1MB, so a 1.5MB app partition keeps a comfortable 500KB of
+# headroom and hands the rest to LittleFS.
+#
+# The littlefs partition uses subtype "spiffs" because that is what
+# esp_littlefs looks for; the label is what LittleFS.begin() matches on.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xE000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x180000,
+littlefs,   data, spiffs,   0x190000, 0x260000,
+coredump,   data, coredump, 0x3F0000, 0x10000,

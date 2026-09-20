@@ -37,12 +37,12 @@ bool Book::open(const char* filename, const PageMetrics& m, Progress progress,
 
   if (!ensureCache(m, progress, user)) return false;
 
-  if (!index_.open(SD, cacheDir_, m)) {
+  if (!index_.open(gStorage.fs(), cacheDir_, m)) {
     error_ = "page index missing";
     return false;
   }
 
-  tocCount_ = loadToc(SD, cacheDir_, toc_, MAX_TOC);
+  tocCount_ = loadToc(gStorage.fs(), cacheDir_, toc_, MAX_TOC);
   page_ = 0;
   return true;
 }
@@ -60,7 +60,7 @@ bool Book::ensureCache(const PageMetrics& m, Progress progress, void* user) {
   char epubPath[160];
   snprintf(epubPath, sizeof(epubPath), "%s/%s", DIR_BOOKS, filename_);
 
-  File probe = SD.open(epubPath, FILE_READ);
+  File probe = gStorage.fs().open(epubPath, FILE_READ);
   if (!probe) {
     error_ = "book file not found";
     return false;
@@ -68,7 +68,7 @@ bool Book::ensureCache(const PageMetrics& m, Progress progress, void* user) {
   uint32_t sourceSize = probe.size();
   probe.close();
 
-  bool cacheValid = loadBookMeta(SD, cacheDir_, meta_) &&
+  bool cacheValid = loadBookMeta(gStorage.fs(), cacheDir_, meta_) &&
                     meta_.sourceSize == sourceSize && meta_.chapterCount > 0;
 
   ImportProgressCtx ctx{progress, user};
@@ -80,7 +80,7 @@ bool Book::ensureCache(const PageMetrics& m, Progress progress, void* user) {
     gStorage.ensureDir(cacheDir_);
 
     EpubImporter importer;
-    if (!importer.import(SD, epubPath, cacheDir_, onExtract, &ctx)) {
+    if (!importer.import(gStorage.fs(), epubPath, cacheDir_, onExtract, &ctx)) {
       error_ = importer.error();
       log_e("book: import failed: %s", error_);
       return false;
@@ -88,8 +88,8 @@ bool Book::ensureCache(const PageMetrics& m, Progress progress, void* user) {
     meta_ = importer.meta();
   }
 
-  if (!PageIndex::exists(SD, cacheDir_, m)) {
-    if (!PageIndex::build(SD, cacheDir_, meta_.chapterCount, m, onIndex, &ctx)) {
+  if (!PageIndex::exists(gStorage.fs(), cacheDir_, m)) {
+    if (!PageIndex::build(gStorage.fs(), cacheDir_, meta_.chapterCount, m, onIndex, &ctx)) {
       error_ = "pagination failed";
       return false;
     }
@@ -106,7 +106,7 @@ bool Book::openChapter(uint16_t chapter) {
 
   char path[192];
   chapterCachePath(cacheDir_, chapter, path, sizeof(path));
-  if (!chapterFeed_.open(SD, path)) {
+  if (!chapterFeed_.open(gStorage.fs(), path)) {
     log_e("book: cannot open chapter %u", chapter);
     openChapter_ = -1;
     return false;
@@ -177,14 +177,14 @@ bool Book::relayout(const PageMetrics& m, Progress progress, void* user) {
   metrics_ = m;
 
   ImportProgressCtx ctx{progress, user};
-  if (!PageIndex::exists(SD, cacheDir_, m)) {
-    if (!PageIndex::build(SD, cacheDir_, meta_.chapterCount, m, onIndex, &ctx)) {
+  if (!PageIndex::exists(gStorage.fs(), cacheDir_, m)) {
+    if (!PageIndex::build(gStorage.fs(), cacheDir_, meta_.chapterCount, m, onIndex, &ctx)) {
       error_ = "pagination failed";
       return false;
     }
   }
 
-  if (!index_.open(SD, cacheDir_, m)) {
+  if (!index_.open(gStorage.fs(), cacheDir_, m)) {
     error_ = "page index missing";
     return false;
   }

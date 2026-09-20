@@ -1,28 +1,27 @@
 #include "hal/Storage.h"
 
-#include <SPI.h>
-
 namespace {
-// Conservative for a dev-board wiring harness; still ~1MB/s, far more than a
-// page turn needs.
-constexpr uint32_t SD_FREQ_HZ = 10000000;
-constexpr uint8_t SD_MAX_OPEN_FILES = 8;
+// Matches the label in partitions/kindle_4mb.csv.
+constexpr const char* PARTITION_LABEL = "littlefs";
+constexpr const char* MOUNT_POINT = "/littlefs";
+// Chapter file, page index, and an upload or extraction target at once.
+constexpr uint8_t MAX_OPEN_FILES = 8;
 }  // namespace
 
 Storage gStorage;
 
 bool Storage::begin() {
-  // Display::begin() already brought up SPI with MISO; if the display has not
-  // been initialised yet this still works because SPI.begin is idempotent.
-  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
-
-  ready_ = SD.begin(PIN_SD_CS, SPI, SD_FREQ_HZ, "/sd", SD_MAX_OPEN_FILES);
+  // Format on failure so a freshly flashed board comes up usable rather than
+  // reporting a storage error the user cannot act on.
+  ready_ = LittleFS.begin(/*formatOnFail=*/true, MOUNT_POINT, MAX_OPEN_FILES,
+                          PARTITION_LABEL);
   if (!ready_) {
-    log_e("SD mount failed on CS=%d -- check the FTS02 chip select pin", PIN_SD_CS);
+    log_e("LittleFS mount failed even after formatting");
     return false;
   }
 
-  log_i("SD mounted, %llu MB total", totalBytes() / (1024ULL * 1024ULL));
+  log_i("LittleFS mounted: %llu KB total, %llu KB free", totalBytes() / 1024,
+        freeBytes() / 1024);
 
   ensureDir(DIR_BOOKS);
   ensureDir(DIR_CACHE);
@@ -30,16 +29,23 @@ bool Storage::begin() {
 }
 
 uint64_t Storage::totalBytes() const {
-  return ready_ ? SD.totalBytes() : 0;
+  return ready_ ? LittleFS.totalBytes() : 0;
 }
 
 uint64_t Storage::usedBytes() const {
-  return ready_ ? SD.usedBytes() : 0;
+  return ready_ ? LittleFS.usedBytes() : 0;
+}
+
+uint64_t Storage::freeBytes() const {
+  if (!ready_) return 0;
+  uint64_t total = LittleFS.totalBytes();
+  uint64_t used = LittleFS.usedBytes();
+  return total > used ? total - used : 0;
 }
 
 bool Storage::ensureDir(const char* path) {
   if (!ready_) return false;
-  if (SD.exists(path)) return true;
+  if (LittleFS.exists(path)) return true;
 
   // Walk the path creating each missing level.
   char buf[128];
@@ -49,20 +55,20 @@ bool Storage::ensureDir(const char* path) {
   for (char* p = buf + 1; *p; p++) {
     if (*p != '/') continue;
     *p = '\0';
-    if (!SD.exists(buf)) SD.mkdir(buf);
+    if (!LittleFS.exists(buf)) LittleFS.mkdir(buf);
     *p = '/';
   }
-  return SD.mkdir(buf) || SD.exists(buf);
+  return LittleFS.mkdir(buf) || LittleFS.exists(buf);
 }
 
 bool Storage::removeTree(const char* path) {
   if (!ready_) return false;
 
-  File dir = SD.open(path);
+  File dir = LittleFS.open(path);
   if (!dir) return false;
   if (!dir.isDirectory()) {
     dir.close();
-    return SD.remove(path);
+    return LittleFS.remove(path);
   }
 
   char child[160];
@@ -76,11 +82,11 @@ bool Storage::removeTree(const char* path) {
     if (isDir) {
       removeTree(child);
     } else {
-      SD.remove(child);
+      LittleFS.remove(child);
     }
   }
   dir.close();
-  return SD.rmdir(path);
+  return LittleFS.rmdir(path);
 }
 
 uint32_t Storage::bookId(const char* filename) {

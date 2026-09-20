@@ -1,18 +1,30 @@
 #pragma once
 #include <Arduino.h>
 #include <FS.h>
-#include <SD.h>
+#include <LittleFS.h>
 
 #include "config.h"
 
-// microSD on the FTS02, sharing VSPI with the e-paper.
+// Book storage in internal flash.
+//
+// The reader needs a filesystem rather than an SD card specifically: with no
+// PSRAM there is nowhere in RAM to hold a decompressed chapter, so storage is
+// the working memory. LittleFS on the 2.4MB partition removes the card, and
+// with it the unverified SD chip select, at the cost of holding one or two
+// books at a time instead of a library.
+//
+// Everything above this layer takes an fs::FS&, so moving back to SD means
+// changing begin() and fs() and nothing else.
 class Storage {
  public:
   bool begin();
   bool ready() const { return ready_; }
 
+  fs::FS& fs() { return LittleFS; }
+
   uint64_t totalBytes() const;
   uint64_t usedBytes() const;
+  uint64_t freeBytes() const;
 
   // Create a directory and any missing parents.
   bool ensureDir(const char* path);

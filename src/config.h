@@ -38,10 +38,14 @@ static constexpr int PIN_SPI_MISO = 19;
 
 // microSD in the FTS02's U3 slot.
 //
-// UNVERIFIED: this chip select was not confirmed against the FTS02 schematic
-// (ESP32-FTS02_SCH-20250819 on good-display.cn). If the card never mounts,
-// this is the first thing to change. GPIO 25 is the other free candidate.
-// Avoid GPIO 0, 2 and 12, which are strapping pins.
+// The reader does not use this: books live in internal flash via LittleFS, so
+// no card is required and this chip select never has to be correct. It is
+// kept for the bring-up firmware's card probe, and for anyone who wants to
+// move storage back to SD for a bigger library.
+//
+// UNVERIFIED against the FTS02 schematic (ESP32-FTS02_SCH-20250819 on
+// good-display.cn). GPIO 25 is the other free candidate; avoid GPIO 0, 2 and
+// 12, which are strapping pins.
 static constexpr int PIN_SD_CS = 15;
 
 // FT6336U capacitive touch, on hardware I2C rather than the vendor's bit-bang.

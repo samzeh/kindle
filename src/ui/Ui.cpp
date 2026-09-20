@@ -1,6 +1,5 @@
 #include "ui/Ui.h"
 
-#include <SD.h>
 
 #include "app/Settings.h"
 #include "config.h"
@@ -33,6 +32,7 @@ enum SettingsRow : uint8_t {
   ROW_MARGIN,
   ROW_SPACING,
   ROW_WIFI,
+  ROW_STORAGE,  // informational
   ROW_CLEAR_CACHE,
   ROW_SLEEP,
   SETTINGS_ROW_COUNT,
@@ -193,7 +193,7 @@ void Ui::scanLibrary() {
   bookCount_ = 0;
   if (!gStorage.ready()) return;
 
-  File dir = SD.open(DIR_BOOKS);
+  File dir = gStorage.fs().open(DIR_BOOKS);
   if (!dir) return;
 
   while (bookCount_ < MAX_BOOKS) {
@@ -497,6 +497,11 @@ void Ui::drawSettings() {
   ui::drawListRow(HEADER_H + ROW_WIFI * ROW_H, ROW_H, "WiFi upload",
                   gUploadServer.running() ? "on" : "off", false, UI_TEXT_PX);
 
+  snprintf(value, sizeof(value), "%lu KB free",
+           static_cast<unsigned long>(gStorage.freeBytes() / 1024));
+  ui::drawListRow(HEADER_H + ROW_STORAGE * ROW_H, ROW_H, "Storage", value, false,
+                  UI_TEXT_PX);
+
   ui::drawListRow(HEADER_H + ROW_CLEAR_CACHE * ROW_H, ROW_H, "Rebuild this book",
                   nullptr, false, UI_TEXT_PX);
 
@@ -567,6 +572,9 @@ void Ui::handleSettings(const TouchEvent& ev) {
         go(Screen::Wifi, Display::Refresh::Full);
       }
       break;
+
+    case ROW_STORAGE:
+      break;  // informational only
 
     case ROW_CLEAR_CACHE: {
       if (!book_.isOpen()) break;

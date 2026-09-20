@@ -61,8 +61,10 @@ void setup() {
   }
 
   if (!gStorage.begin()) {
-    reportFailure("No SD card",
-                  "check the card and SD_CS in config.h");
+    // LittleFS formats on failure, so reaching here means the flash itself or
+    // the partition table is wrong rather than a first-boot empty filesystem.
+    reportFailure("Storage error",
+                  "flash partition could not be mounted or formatted");
     return;
   }
   logMemory("sd");

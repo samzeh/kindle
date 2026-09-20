@@ -1,6 +1,5 @@
 #include "net/UploadServer.h"
 
-#include <SD.h>
 #include <WebServer.h>
 #include <WiFi.h>
 
@@ -12,6 +11,12 @@ namespace {
 WebServer gServer(80);
 File gUploadFile;
 bool gUploadFailed = false;
+const char* gUploadError = "";
+
+// Refuse an upload below this much free space. A book costs its own size
+// again in decompressed chapters, so accepting one that barely fits would
+// only fail later during import.
+constexpr uint64_t MIN_FREE_BYTES = 256 * 1024;
 
 constexpr uint32_t STATION_TIMEOUT_MS = 12000;
 constexpr const char* AP_SSID = "Kindle-Setup";
@@ -31,7 +36,7 @@ const char kPageHead[] PROGMEM =
     "</style></head><body><h1>Books on device</h1>"
     "<form method=POST action=/upload enctype=multipart/form-data>"
     "<input type=file name=book accept=.epub,.txt multiple required>"
-    "<button type=submit>Upload</button></form><ul>";
+    "<button type=submit>Upload</button></form>";
 
 const char kPageTail[] PROGMEM = "</ul></body></html>";
 
@@ -64,7 +69,15 @@ void handleRoot() {
   page.reserve(2048);
   page += FPSTR(kPageHead);
 
-  File dir = SD.open(DIR_BOOKS);
+  // Storage is internal flash, not a card, so the ceiling is low enough that
+  // it is worth showing before someone tries to upload a third novel.
+  page += "<p><b>";
+  page += String(static_cast<uint32_t>(gStorage.freeBytes() / 1024));
+  page += " KB free</b> of ";
+  page += String(static_cast<uint32_t>(gStorage.totalBytes() / 1024));
+  page += " KB. A book also needs about its own size again once imported.</p><ul>";
+
+  File dir = gStorage.fs().open(DIR_BOOKS);
   if (dir) {
     while (true) {
       File entry = dir.openNextFile();
@@ -98,22 +111,34 @@ void handleUploadData() {
 
   if (upload.status == UPLOAD_FILE_START) {
     gUploadFailed = false;
+    gUploadError = "";
 
     char safe[80];
     sanitiseName(upload.filename.c_str(), safe, sizeof(safe));
     if (!hasBookExtension(safe)) {
       gUploadFailed = true;
+      gUploadError = "Only .epub and .txt files are accepted";
       log_w("upload: rejected '%s'", safe);
+      return;
+    }
+
+    // Check before writing rather than filling the partition and failing
+    // mid-stream, which would leave a truncated book behind.
+    if (gStorage.freeBytes() < MIN_FREE_BYTES) {
+      gUploadFailed = true;
+      gUploadError = "Not enough free space. Delete a book first.";
+      log_w("upload: only %llu KB free", gStorage.freeBytes() / 1024);
       return;
     }
 
     char path[160];
     snprintf(path, sizeof(path), "%s/%s", DIR_BOOKS, safe);
-    SD.remove(path);
+    gStorage.fs().remove(path);
 
-    gUploadFile = SD.open(path, FILE_WRITE);
+    gUploadFile = gStorage.fs().open(path, FILE_WRITE);
     if (!gUploadFile) {
       gUploadFailed = true;
+      gUploadError = "Could not create the file";
       log_e("upload: cannot create %s", path);
     }
     return;
@@ -123,7 +148,8 @@ void handleUploadData() {
     if (gUploadFile && !gUploadFailed) {
       if (gUploadFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
         gUploadFailed = true;
-        log_e("upload: short write, card may be full");
+        gUploadError = "Ran out of space partway through";
+        log_e("upload: short write, storage is full");
       }
     }
     return;
@@ -145,7 +171,8 @@ void UploadServer::routes() {
       "/upload", HTTP_POST,
       [this]() {
         if (gUploadFailed) {
-          gServer.send(500, "text/plain", "Upload failed");
+          gServer.send(507, "text/plain",
+                       *gUploadError ? gUploadError : "Upload failed");
         } else {
           changes_++;
           gServer.sendHeader("Location", "/");
@@ -164,7 +191,7 @@ void UploadServer::routes() {
 
     char path[160];
     snprintf(path, sizeof(path), "%s/%s", DIR_BOOKS, safe);
-    if (SD.remove(path)) {
+    if (gStorage.fs().remove(path)) {
       // Drop the derived cache too, or the next book with this name would
       // inherit stale chapters.
       char cache[80];
