@@ -1,0 +1,9 @@
+{
+  "name": "miniz",
+  "version": "3.1.2",
+  "description": "DEFLATE/ZIP reader, used to stream EPUB entries off the SD card",
+  "license": "MIT",
+  "build": {
+    "srcFilter": ["+<miniz.c>"]
+  }
+}

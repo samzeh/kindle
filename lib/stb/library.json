@@ -1,0 +1,9 @@
+{
+  "name": "stb",
+  "version": "1.0.0",
+  "description": "stb_truetype single-header font rasteriser",
+  "license": "MIT",
+  "build": {
+    "srcFilter": ["-<*>"]
+  }
+}
