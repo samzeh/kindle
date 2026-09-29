@@ -12,6 +12,10 @@ enum ReadingAction : uint8_t {
 // Which action a tap at screen x maps to. Pure, so it is tested on the host.
 ReadingAction readingHitTest(int16_t x);
 
+// Switches to book `index`, at the start (or its saved position once
+// persistence exists).
+void readingOpenBook(uint8_t index);
+
 // Draws the current page.
 void readingShow(bool fullRefresh);
 

@@ -3,13 +3,14 @@
 
 #include "board_config.h"
 #include "epd.h"
+#include "library.h"
 #include "reading.h"
 #include "screens.h"
 
 // Full-screen buffer (48 KB): each screen is drawn in RAM, then sent in one
 // go. Its memory layout matches the panel's, so it is sent unchanged.
 static GFXcanvas1 canvas(EPD_NATIVE_WIDTH, EPD_NATIVE_HEIGHT);
-static Screen current = SCREEN_READING;
+static Screen current = SCREEN_LIBRARY;
 
 GFXcanvas1 &appCanvas() {
   return canvas;
@@ -17,8 +18,8 @@ GFXcanvas1 &appCanvas() {
 
 static void showCurrent(bool fullRefresh) {
   switch (current) {
+    case SCREEN_LIBRARY: libraryShow(fullRefresh); break;
     case SCREEN_READING: readingShow(fullRefresh); break;
-    default: break;
   }
 }
 
@@ -29,11 +30,14 @@ void appGoTo(Screen s) {
 
 void appBegin() {
   canvas.setRotation(SCREEN_ROTATION);
-  appGoTo(SCREEN_READING);
+  appGoTo(SCREEN_LIBRARY);
 }
 
 void appTurnPage(int delta) {
-  if (current == SCREEN_READING) readingTurnPage(delta);
+  switch (current) {
+    case SCREEN_LIBRARY: libraryTurnPage(delta); break;
+    case SCREEN_READING: readingTurnPage(delta); break;
+  }
 }
 
 // Taps arrive in raw touch coordinates. Normalise once here, so every screen
@@ -43,7 +47,7 @@ void appTap(uint16_t rawX, uint16_t rawY) {
   int16_t y = (int16_t)rawY;
   Serial.printf("tap at %d,%d\n", x, y);
   switch (current) {
+    case SCREEN_LIBRARY: libraryTap(x, y); break;
     case SCREEN_READING: readingTap(x, y); break;
-    default: break;
   }
 }

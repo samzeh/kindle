@@ -5,6 +5,7 @@
 #include "books.h"
 #include "cover.h"
 #include "epd.h"
+#include "library.h"
 #include "reading.h"
 
 SerialPort Serial;
@@ -85,10 +86,95 @@ static void testCoverScaling() {
   CHECK(!coverBit(row, 6, 1));
 }
 
+static void testLibraryGridHitTest() {
+  // Four books per page in grid view.
+  CHECK_EQ(libraryPageCount(LIB_VIEW_GRID), 1);  // BOOK_COUNT == 4
+
+  // Header, right side: toggles the view.
+  CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
+  // Header, left side: nothing.
+  CHECK_EQ(libraryHitTest(100, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);
+
+  // The four cover cells, sampled at their centres.
+  LibraryHit topLeft = libraryHitTest(126, 200, 0, LIB_VIEW_GRID);
+  CHECK_EQ(topLeft.action, LIB_OPEN_BOOK);
+  CHECK_EQ(topLeft.book, 0);
+
+  LibraryHit topRight = libraryHitTest(354, 200, 0, LIB_VIEW_GRID);
+  CHECK_EQ(topRight.action, LIB_OPEN_BOOK);
+  CHECK_EQ(topRight.book, 1);
+
+  LibraryHit bottomLeft = libraryHitTest(126, 550, 0, LIB_VIEW_GRID);
+  CHECK_EQ(bottomLeft.action, LIB_OPEN_BOOK);
+  CHECK_EQ(bottomLeft.book, 2);
+
+  LibraryHit bottomRight = libraryHitTest(354, 550, 0, LIB_VIEW_GRID);
+  CHECK_EQ(bottomRight.action, LIB_OPEN_BOOK);
+  CHECK_EQ(bottomRight.book, 3);
+
+  // The gutter between the columns opens nothing.
+  CHECK_EQ(libraryHitTest(240, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  // Left of the first column, inside the margin, opens nothing.
+  CHECK_EQ(libraryHitTest(10, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
+
+  // Footer paging.
+  CHECK_EQ(libraryHitTest(50, 780, 0, LIB_VIEW_GRID).action, LIB_PREV_PAGE);
+  CHECK_EQ(libraryHitTest(400, 780, 0, LIB_VIEW_GRID).action, LIB_NEXT_PAGE);
+  CHECK_EQ(libraryHitTest(240, 780, 0, LIB_VIEW_GRID).action, LIB_NONE);
+}
+
+static void testDrawCoverPixels() {
+  // A synthetic cover: ink at (10,10) and across a band of rows around 200,
+  // paper elsewhere. Points are chosen well inside the 1px frame drawCover
+  // draws. The band (not a single row) matters for the thumbnail check below:
+  // nearest-neighbour downsampling from 306 to 108 rows only samples every
+  // ~2.8th source row, so a single inked row can fall in a gap between
+  // sampled rows and never appear in the thumbnail even though the bit
+  // convention is correct.
+  static uint8_t cover[COVER_ROW_BYTES * COVER_H] = { 0 };
+  cover[10 * COVER_ROW_BYTES + 10 / 8] |= 0x80 >> (10 % 8);
+  for (int16_t y = 195; y <= 205; y++) {
+    for (int16_t x = 0; x < COVER_W; x++) {
+      cover[y * COVER_ROW_BYTES + x / 8] |= 0x80 >> (x % 8);
+    }
+  }
+
+  const Book withArt = { "T", "A", "text", cover };
+  GFXcanvas1 full(COVER_W, COVER_H);
+  full.fillScreen(0xFFFF);
+  drawCover(full, withArt, 0, 0, COVER_W, COVER_H);
+
+  // A 1 bit in the source is INK, i.e. a BLACK pixel. If this fails with the
+  // paper check below passing, the bit convention is inverted and every cover
+  // renders as a photographic negative.
+  CHECK(!full.getPixel(10, 10));       // false == black in GFXcanvas1
+  CHECK(!full.getPixel(100, 200));     // on the ink row
+  CHECK(full.getPixel(100, 150));      // a 0 bit stays white
+
+  // Downscaled to a thumbnail, the ink band still lands as ink.
+  GFXcanvas1 thumb(THUMB_W, THUMB_H);
+  thumb.fillScreen(0xFFFF);
+  drawCover(thumb, withArt, 0, 0, THUMB_W, THUMB_H);
+  int16_t inkRow = 200 * THUMB_H / COVER_H;   // nearest-neighbour inverse
+  CHECK(!thumb.getPixel(THUMB_W / 2, inkRow));
+  CHECK(thumb.getPixel(THUMB_W / 2, 30));     // well outside the band: white
+
+  // The nullptr fallback draws a frame rather than nothing — this is the only
+  // path that renders today, since every book has cover == nullptr.
+  const Book noArt = { "Title", "Author", "text", nullptr };
+  GFXcanvas1 fb(COVER_W, COVER_H);
+  fb.fillScreen(0xFFFF);
+  drawCover(fb, noArt, 0, 0, COVER_W, COVER_H);
+  CHECK(!fb.getPixel(0, 0));                       // frame corner is ink
+  CHECK(!fb.getPixel(COVER_W - 1, COVER_H - 1));   // opposite corner too
+}
+
 int main() {
   testReadingHitTest();
   testBookTable();
   testCoverScaling();
+  testLibraryGridHitTest();
+  testDrawCoverPixels();
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;

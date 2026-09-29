@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "board_config.h"
+#include "books.h"
 #include "epd.h"
 #include "layout.h"
-#include "sample_text.h"
 #include "screens.h"
 
 // Page turns use the no-flash refresh, which leaves faint ghosting over time.
@@ -28,19 +28,27 @@ static const PageFonts fonts = {
 };
 
 static PageLayout *layout = nullptr;
+static uint8_t currentBook = 0;
 static std::vector<PagePos> pageStarts;  // grows as pages are visited
 static size_t currentPage = 0;
 static uint8_t turnsSinceFullRefresh = 0;
+
+void readingOpenBook(uint8_t index) {
+  if (index >= BOOK_COUNT) return;
+  currentBook = index;
+  delete layout;
+  layout = new PageLayout(appCanvas(), BOOKS[index].text, fonts);
+  pageStarts.clear();
+  pageStarts.push_back({ 0, false });
+  currentPage = 0;
+}
 
 ReadingAction readingHitTest(int16_t x) {
   return x < SCREEN_W / 3 ? READ_PREV : READ_NEXT;
 }
 
 void readingShow(bool fullRefresh) {
-  if (!layout) {
-    layout = new PageLayout(appCanvas(), SAMPLE_TEXT, fonts);
-    pageStarts.push_back({ 0, false });
-  }
+  if (!layout) readingOpenBook(currentBook);
   unsigned long t0 = millis();
   PagePos next = layout->layoutPage(pageStarts[currentPage], true);
   if (currentPage + 1 == pageStarts.size() && !layout->isEnd(next)) {
