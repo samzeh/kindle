@@ -141,15 +141,31 @@ void    storeSaveView(uint8_t view);   // 0 = grid, 1 = list
 uint8_t storeLoadView();               // 0 (grid) if unset
 ```
 
-Keys are `p<index>` / `i<index>` per book, plus `view`.
+Keys are one `p<index>` per book, plus `view`.
 
 There is deliberately no "last book opened" key: the library is the home
 screen, so nothing would read it.
 
-**Write policy.** NVS has a finite erase-cycle budget, so progress is *not*
-written on every page turn. It is written when leaving the reading screen, and
-as a safety net against power loss, every 20 page turns. The view toggle is
-written when it changes, which is rare.
+**Write policy.** Progress is saved on **every page turn**, plus when leaving
+the reading screen. Nothing is lost to an unexpected power cut.
+
+This is safe, and the arithmetic matters because the instinct is to assume
+otherwise. NVS does not erase per write: it appends a 32-byte entry per value
+and only erases a page once full, at 126 entries per 4 KB page. `offset` and
+`italic` are packed into a **single** `uint32` (see below), so one save is one
+entry — 126 saves per erase. Against a ~100,000 erase budget that is ~12.6 M
+saves on a single page, before the wear levelling across the partition's six
+pages is counted at all. At a heavy 1,000 page turns per day, that is decades.
+
+Two further things make it cheaper than it looks: NVS skips a write whose
+value is unchanged, so the leaving-the-screen save costs nothing when the
+position already matches, and a ~10–20 ms commit disappears entirely inside
+the ~800 ms partial refresh a page turn already costs.
+
+**Packing.** `storeSaveProgress` stores offset and italic as one `uint32`:
+offset in bits 0–30, italic in bit 31. Text lengths are nowhere near 2^31, and
+it halves entry churn while reducing each book to a single key. The packing is
+internal — callers still pass `(book, offset, italic)`.
 
 `store.cpp` uses `Preferences.h`, which is ESP32-only, so it joins
 `HARDWARE_ONLY` in `simulator/Makefile` and `simulator/main.cpp` provides a
@@ -294,8 +310,10 @@ than eyeballing:
 
 ## Risks
 
-- **Flash wear** if the write policy regresses to per-page-turn saves. The 20
-  page-turn safety net is the only periodic writer; keep it there.
+- **Flash wear** is *not* a risk at one save per page turn — see the
+  arithmetic above. It would become one if progress were ever written on a
+  timer while a page is merely open, or if the packing regressed to several
+  keys per save.
 - **RAM.** One shared canvas is the rule. The list view's downscale must read
   source bits directly, never materialise a scaled buffer.
 - **Cover bit convention** is easy to get backwards; a cover rendering as a
