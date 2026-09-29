@@ -3,6 +3,7 @@
 #include <cstdio>
 #include "Arduino.h"
 #include "books.h"
+#include "cover.h"
 #include "epd.h"
 #include "reading.h"
 
@@ -57,9 +58,37 @@ static void testBookTable() {
       CHECK(strcmp(BOOKS[i].title, BOOKS[j].title) != 0);
 }
 
+static void testCoverScaling() {
+  // At native size, destination and source indices agree.
+  CHECK_EQ(coverSrcIndex(0, COVER_W, COVER_W), 0);
+  CHECK_EQ(coverSrcIndex(203, COVER_W, COVER_W), 203);
+
+  // Downscaled to a thumbnail, indices stay inside the source.
+  CHECK_EQ(coverSrcIndex(0, 72, COVER_W), 0);
+  CHECK_EQ(coverSrcIndex(71, 72, COVER_W), 201);
+  CHECK_EQ(coverSrcIndex(0, 108, COVER_H), 0);
+  CHECK_EQ(coverSrcIndex(107, 108, COVER_H), 303);
+
+  // Never reads past the end, at any destination size.
+  for (int16_t size = 1; size <= COVER_W; size++) {
+    CHECK(coverSrcIndex(size - 1, size, COVER_W) < COVER_W);
+    CHECK(coverSrcIndex(0, size, COVER_W) >= 0);
+  }
+
+  // Bit order is MSB first: bit 0 of the first byte is the leftmost pixel.
+  static uint8_t row[COVER_ROW_BYTES * 2] = { 0 };
+  row[0] = 0x80;                     // (0,0) is ink
+  row[COVER_ROW_BYTES] = 0x01;       // (7,1) is ink
+  CHECK(coverBit(row, 0, 0));
+  CHECK(!coverBit(row, 1, 0));
+  CHECK(coverBit(row, 7, 1));
+  CHECK(!coverBit(row, 6, 1));
+}
+
 int main() {
   testReadingHitTest();
   testBookTable();
+  testCoverScaling();
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;
