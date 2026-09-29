@@ -14,21 +14,31 @@ int16_t coverSrcIndex(int16_t dst, int16_t dstSize, int16_t srcSize) {
   return (int16_t)(((int32_t)dst * srcSize) / dstSize);
 }
 
-void drawCentredText(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
-                     int16_t boxX, int16_t boxW, int16_t baseline) {
-  char buf[48];
-  strncpy(buf, text, sizeof(buf) - 1);
-  buf[sizeof(buf) - 1] = '\0';
+const char *truncateToWidth(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
+                            int16_t maxW, char *out, size_t outSize) {
+  strncpy(out, text, outSize - 1);
+  out[outSize - 1] = '\0';
 
   gfx.setFont(font);
   int16_t x1, y1;
   uint16_t w, h;
-  gfx.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
-  while (w > boxW && strlen(buf) > 4) {
-    size_t n = strlen(buf);
-    strcpy(buf + n - 4, "...");
-    gfx.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  gfx.getTextBounds(out, 0, 0, &x1, &y1, &w, &h);
+  while (w > maxW && strlen(out) > 4) {
+    size_t n = strlen(out);
+    strcpy(out + n - 4, "...");
+    gfx.getTextBounds(out, 0, 0, &x1, &y1, &w, &h);
   }
+  return out;
+}
+
+void drawCentredText(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
+                     int16_t boxX, int16_t boxW, int16_t baseline) {
+  char buf[48];
+  truncateToWidth(gfx, text, font, boxW, buf, sizeof(buf));
+
+  int16_t x1, y1;
+  uint16_t w, h;
+  gfx.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
   gfx.setCursor(boxX + (boxW - (int16_t)w) / 2 - x1, baseline);
   gfx.print(buf);
 }

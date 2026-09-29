@@ -5,6 +5,7 @@
 // padded to whole bytes: the layout Adafruit_GFX::drawBitmap expects.
 #pragma once
 #include <Adafruit_GFX.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "books.h"
@@ -29,6 +30,12 @@ bool coverBit(const uint8_t *cover, int16_t sx, int16_t sy);
 
 // Nearest-neighbour: which source pixel a destination pixel samples.
 int16_t coverSrcIndex(int16_t dst, int16_t dstSize, int16_t srcSize);
+
+// Copies `text` into `out` (an `outSize`-byte buffer), shortening it with a
+// trailing "..." until it renders no wider than `maxW` pixels in `font`.
+// Sets the font on `gfx` (needed to measure). Returns `out`.
+const char *truncateToWidth(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
+                            int16_t maxW, char *out, size_t outSize);
 
 // Draws `text` centred in a box `boxW` wide starting at `boxX`, with its
 // baseline at `baseline`, truncating with "..." if it does not fit.

@@ -8,6 +8,7 @@
 #include "library.h"
 #include "reading.h"
 #include "screens.h"
+#include <Fonts/FreeSerifBold9pt7b.h>
 
 SerialPort Serial;
 
@@ -85,6 +86,33 @@ static void testCoverScaling() {
   CHECK(!coverBit(row, 1, 0));
   CHECK(coverBit(row, 7, 1));
   CHECK(!coverBit(row, 6, 1));
+}
+
+// truncateToWidth backs both drawCentredText (grid captions, footer labels)
+// and the list view's title/author -- this is the one place its shortening
+// behaviour is under direct test.
+static void testTruncateToWidth() {
+  GFXcanvas1 canvas(400, 100);  // throwaway: only used to measure text
+  char buf[48];
+
+  // Fits already: comes back unchanged.
+  truncateToWidth(canvas, "Short", &FreeSerifBold9pt7b, 200, buf, sizeof(buf));
+  CHECK(strcmp(buf, "Short") == 0);
+
+  // Too long for the box: shortened, and ends with the ellipsis rather than
+  // overflowing its column.
+  const char *longTitle = "A Remarkably Long and Overwrought Title That Will Not Fit";
+  truncateToWidth(canvas, longTitle, &FreeSerifBold9pt7b, 200, buf, sizeof(buf));
+  CHECK(strlen(buf) < strlen(longTitle));
+  CHECK(strlen(buf) >= 3);
+  CHECK(strcmp(buf + strlen(buf) - 3, "...") == 0);
+
+  // The truncated result actually fits the box it was truncated to.
+  int16_t x1, y1;
+  uint16_t w, h;
+  canvas.setFont(&FreeSerifBold9pt7b);
+  canvas.getTextBounds(buf, 0, 0, &x1, &y1, &w, &h);
+  CHECK(w <= 200);
 }
 
 static void testLibraryGridHitTest() {
@@ -283,6 +311,55 @@ static void testReadingProgressPercent() {
   CHECK_EQ(readingProgressPercent(1), 0);
 }
 
+// The list row's percentage must be right-aligned by measuring its actual
+// width, not a fixed cursor offset -- a fixed offset is only ever correct
+// for one string length, and "0%" (2 chars) and a two-digit percentage
+// (4 chars) are different widths. This drives book 0's progress into double
+// digits (turning pages on the real, long sample text) and checks the
+// rendered label's rightmost ink pixel, so it actually exercises a
+// multi-character label rather than only ever testing "0%", which would
+// pass even under the fixed-offset bug. Placed with the other
+// state-mutating tests (drives readingOpenBook/readingTurnPage, which
+// draw through the shared appCanvas() singleton and mutate reading.cpp's
+// statics), and restores `view` to grid afterward so it does not affect
+// testLibraryGridNoDuplicateCaption, which must stay last.
+static void testListRowPercentRightAligned() {
+  libraryTap(400, 20);  // header toggle: grid -> list
+
+  readingOpenBook(0);
+  readingShow(true);
+  uint32_t pct = readingProgressPercent(0);
+  int guard = 0;
+  while (pct < 10 && guard < 50) {
+    readingTurnPage(1);
+    pct = readingProgressPercent(0);
+    guard++;
+  }
+  CHECK(pct >= 10);  // needed a 2+ digit label; the fixed book is long enough
+  CHECK(pct <= 99);
+
+  libraryShow(false);  // redraw the list view with book 0's updated progress
+
+  GFXcanvas1 &gfx = appCanvas();
+  // Book 0 is list row 0: y 50-167 (LIST_TOP=50, LIST_ROW_H=118). Scanning
+  // x >= 400 stays clear of the progress bar (which ends at x = 392) and of
+  // the row's bottom divider line (y = 167), so only the percentage label's
+  // own pixels can be found here.
+  int16_t maxInkX = -1;
+  for (int16_t y = 50; y <= 165; y++) {
+    for (int16_t x = 400; x < 480; x++) {
+      // false == black in GFXcanvas1. Track a true running max, not the last
+      // ink pixel visited -- a later row with ink further left would
+      // otherwise overwrite a correct answer from an earlier row.
+      if (!gfx.getPixel(x, y) && x > maxInkX) maxInkX = x;
+    }
+  }
+  CHECK(maxInkX >= 0);            // the label did render something
+  CHECK_EQ(maxInkX, 455);         // SCREEN_W(480) - MARGIN_X(24) - 1
+
+  libraryTap(400, 20);  // header toggle: list -> grid, restore state
+}
+
 // Every current book has cover == nullptr, so drawCover's placeholder
 // already states title and author once inside the frame. The grid's own
 // caption band below the cover must stay blank in that case, or the text is
@@ -304,11 +381,13 @@ int main() {
   testReadingHitTest();
   testBookTable();
   testCoverScaling();
+  testTruncateToWidth();
   testLibraryGridHitTest();
   testLibraryListHitTest();
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
   testReadingProgressPercent();
+  testListRowPercentRightAligned();
   testLibraryGridNoDuplicateCaption();
   if (failures) {
     printf("%d failure(s)\n", failures);

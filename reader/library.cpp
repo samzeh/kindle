@@ -33,6 +33,8 @@ static const int16_t LIST_ROW_H = 118;
 static const int16_t LIST_TEXT_X = 112;   // MARGIN_X + THUMB_W + 16
 static const int16_t LIST_BAR_W = 280;
 static const int16_t LIST_BAR_H = 8;
+// Text column right edge is the page's right margin, matching MARGIN_X.
+static const int16_t LIST_TEXT_MAX_W = SCREEN_W - MARGIN_X - LIST_TEXT_X;  // 344
 
 static uint8_t view = LIB_VIEW_GRID;
 static uint8_t page = 0;
@@ -140,13 +142,14 @@ static void drawList(Adafruit_GFX &gfx) {
     drawCover(gfx, BOOKS[index], MARGIN_X, top + 5, THUMB_W, THUMB_H);
 
     gfx.setTextColor(INK);
-    gfx.setFont(&FreeSerifBold9pt7b);
+    char buf[48];
+    truncateToWidth(gfx, BOOKS[index].title, &FreeSerifBold9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
     gfx.setCursor(LIST_TEXT_X, top + 30);
-    gfx.print(BOOKS[index].title);
+    gfx.print(buf);
 
-    gfx.setFont(&FreeSerif9pt7b);
+    truncateToWidth(gfx, BOOKS[index].author, &FreeSerif9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
     gfx.setCursor(LIST_TEXT_X, top + 54);
-    gfx.print(BOOKS[index].author);
+    gfx.print(buf);
 
     uint32_t pct = readingProgressPercent(index);
     int16_t barY = top + 72;
@@ -154,9 +157,16 @@ static void drawList(Adafruit_GFX &gfx) {
     int16_t filled = (int16_t)((LIST_BAR_W - 2) * pct / 100);
     if (filled > 0) gfx.fillRect(LIST_TEXT_X + 1, barY + 1, filled, LIST_BAR_H - 2, INK);
 
+    // Right-aligned at x = SCREEN_W - MARGIN_X: measure, don't guess a fixed
+    // offset, since "0%" and "100%" are different widths (see PageLayout::
+    // drawFooter, which measures the same "%u%%" label for the same reason).
     char label[8];
     snprintf(label, sizeof(label), "%u%%", (unsigned)pct);
-    gfx.setCursor(SCREEN_W - MARGIN_X - 36, barY + LIST_BAR_H);
+    gfx.setFont(&FreeSerif9pt7b);
+    int16_t x1, y1;
+    uint16_t w, h;
+    gfx.getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
+    gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, barY + LIST_BAR_H);
     gfx.print(label);
 
     if (row + 1 < LIST_PER_PAGE && (uint8_t)(index + 1) < BOOK_COUNT) {
