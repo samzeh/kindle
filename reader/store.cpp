@@ -1,10 +1,20 @@
 #include "store.h"
+#include <Arduino.h>
 #include <Preferences.h>
 
 static Preferences prefs;
 
 void storeBegin() {
-  prefs.begin("reader", false);
+  // Report a failed mount rather than discarding it. With the namespace
+  // unopened every getUInt/getUChar returns its default and every put is
+  // dropped, so reading positions simply never persist and there is no symptom
+  // to chase. Same idea as touchBegin's "no answer at 0x38" line: make the
+  // fault announce itself on the serial monitor at startup.
+  if (!prefs.begin("reader", false)) {
+    Serial.println("store: NVS namespace \"reader\" would not open. Reading "
+                   "positions and the library view will not be saved this "
+                   "session; erase flash and re-upload if it keeps happening.");
+  }
 }
 
 static void progressKey(uint8_t book, char *out, size_t n) {
