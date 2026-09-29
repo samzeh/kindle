@@ -1,8 +1,12 @@
-// Desktop simulator for the e-reader. Runs the same reader code as the ESP32
-// (reader/app.cpp and reader/layout.cpp) and shows the screen in a window.
+// Desktop simulator for the e-reader. Builds every .cpp in reader/ except
+// the hardware drivers (epd.cpp, touch.cpp, store.cpp), which this file
+// stands in for -- so it runs the same reader code as the ESP32, screens
+// and all, and shows it in a window.
 //
-//   click          tap (left third = previous page, rest = next page)
-//   right / left   next / previous page (also n / p)
+//   click          tap: in a book, left third = previous page, middle =
+//                  controls, right third = next page. In the library, a
+//                  cover or row opens that book.
+//   right / left   next / previous page (also n / p; pages the library too)
 //   v              toggle the library view (grid / list)
 //   l              back to the library, from inside a book
 //   o              open book 0 (taps the grid's top-left cover), from the library
