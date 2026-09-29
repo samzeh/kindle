@@ -50,8 +50,32 @@ void readingOpenBook(uint8_t index) {
   uint32_t offset = 0;
   bool italic = false;
   storeLoadProgress(index, offset, italic);
-  pageStarts.push_back({ offset, italic });
+
+  // Rebuild the page history up to the saved position instead of making the
+  // restored page look like page 1. currentPage == 0 has to keep meaning "the
+  // first page of the book", or readingTurnPage(-1)'s guard refuses every
+  // backward turn for the rest of the session and the footer numbers the
+  // restored page 1.
+  //
+  // layoutPage(_, false) draws nothing -- every setFont / fillScreen /
+  // drawFooter in layout.cpp sits inside an `if (draw)` -- so this mutates no
+  // canvas state, and the texts are a few KB, so it is a handful of cheap
+  // passes. The style at each boundary comes back from layoutPage, so the
+  // saved italic flag is recomputed rather than trusted.
+  pageStarts.push_back({ 0, false });
   currentPage = 0;
+  while (true) {
+    const PagePos back = pageStarts.back();  // by value: push_back invalidates
+    if (back.offset >= offset) break;        // reached the saved position
+    const PagePos next = layout->layoutPage(back, false);
+    if (layout->isEnd(next)) break;          // saved offset is at or past the end
+    if (next.offset <= back.offset) break;   // no progress: never loop forever
+    pageStarts.push_back(next);
+    // Only pages that begin at or before the saved offset can be the one the
+    // reader was on; a page starting past it is simply the next page.
+    if (next.offset <= offset) currentPage = pageStarts.size() - 1;
+  }
+
   turnsSinceFullRefresh = 0;
   controlsVisible = false;
 }

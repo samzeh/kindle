@@ -22,13 +22,22 @@ void epdSleep() {}
 // ---- Stand-ins for persistence (reader/store.h) ----
 // store.cpp is hardware-only (real NVS via Preferences), so it is not linked
 // into this target, but reading.cpp and library.cpp call into it regardless.
-// A no-op is enough here: the host tests exercise readingProgressPercent's
-// behaviour through reading.cpp's own in-memory state (pageStarts), not
-// through persistence, and must not read or write a state file on disk --
-// that would make them order- and history-dependent.
+// Nothing touches a state file on disk -- that would make these tests order-
+// and history-dependent. Most tests want "nothing has ever been saved", which
+// is the default; testResumeRebuildsPageHistory sets a saved offset through
+// `fakeSaved*` and clears it again afterwards.
+static bool fakeSavedValid = false;
+static uint32_t fakeSavedOffset = 0;
+static bool fakeSavedItalic = false;
+
 void storeBegin() {}
 void storeSaveProgress(uint8_t, uint32_t, bool) {}
-bool storeLoadProgress(uint8_t, uint32_t &, bool &) { return false; }
+bool storeLoadProgress(uint8_t, uint32_t &offset, bool &italic) {
+  if (!fakeSavedValid) return false;
+  offset = fakeSavedOffset;
+  italic = fakeSavedItalic;
+  return true;
+}
 void storeSaveView(uint8_t) {}
 uint8_t storeLoadView() { return 0; }
 
@@ -397,6 +406,85 @@ static void testControlsVisibleSurvivesRejectedTurn() {
   CHECK(readingProgressPercent(0) < afterTurn);
 }
 
+// Resuming a book must restore the page the reader was on together with the
+// history in front of it, not fabricate a one-entry history: currentPage == 0
+// is pagination's meaning of "the first page of this book", so a restored page
+// numbered 0 can never be turned back and is labelled page 1 in the footer.
+// There is no getter for currentPage, so this drives the observable
+// consequences instead -- readingProgressPercent, and whether a backward turn
+// actually moves the page. Placed with the other state-mutating reading tests,
+// and it clears the fake saved position again so later tests still see a shelf
+// nothing has ever been read from.
+static void testResumeRebuildsPageHistory() {
+  const uint32_t len = (uint32_t)strlen(BOOKS[0].text);
+
+  // Resume from the middle of the book.
+  fakeSavedValid = true;
+  fakeSavedItalic = false;
+  fakeSavedOffset = len / 2;
+  readingOpenBook(0);
+  readingShow(true);
+
+  // The restored page is the one containing the saved offset, so it begins at
+  // or before the halfway mark (percent is floor(offset * 100 / len)).
+  const uint32_t restored = readingProgressPercent(0);
+  CHECK(restored > 0);
+  CHECK(restored <= 50);
+
+  // The backward turn is accepted and moves the page: the whole point of
+  // rebuilding the history. Against a one-entry history this turn is refused
+  // and the percentage never budges.
+  readingTurnPage(-1);
+  const uint32_t previous = readingProgressPercent(0);
+  CHECK(previous < restored);
+
+  // Forward again returns to exactly the restored page, and the page after it
+  // begins past the saved offset -- together with `restored <= 50` that pins
+  // the saved offset inside the restored page rather than merely near it.
+  readingTurnPage(1);
+  CHECK_EQ(readingProgressPercent(0), restored);
+  readingTurnPage(1);
+  CHECK(readingProgressPercent(0) >= 50);
+
+  // Turning back from there reaches the first page rather than stalling
+  // partway, and it takes several turns -- so this really was a page deep in
+  // the book, not page 1 wearing a high percentage.
+  int guard = 0;
+  while (readingProgressPercent(0) > 0 && guard < 500) {
+    readingTurnPage(-1);
+    guard++;
+  }
+  CHECK(guard > 1);
+  CHECK(guard < 500);
+  CHECK_EQ(readingProgressPercent(0), 0);
+
+  // A saved offset at or past the end of the text must terminate the walk and
+  // land on a real last page: forward refused, backward still accepted.
+  fakeSavedOffset = len + 1000;
+  readingOpenBook(0);
+  readingShow(true);
+  const uint32_t last = readingProgressPercent(0);
+  CHECK(last > 0);
+  CHECK(last <= 100);
+  readingTurnPage(1);
+  CHECK_EQ(readingProgressPercent(0), last);  // already the last page
+  readingTurnPage(-1);
+  CHECK(readingProgressPercent(0) < last);
+
+  // A saved offset of 0 behaves exactly as a book that was never opened: the
+  // first page, with the backward turn refused and nothing left corrupted.
+  fakeSavedOffset = 0;
+  readingOpenBook(0);
+  readingShow(true);
+  CHECK_EQ(readingProgressPercent(0), 0);
+  readingTurnPage(-1);
+  CHECK_EQ(readingProgressPercent(0), 0);
+  readingTurnPage(1);
+  CHECK(readingProgressPercent(0) > 0);
+
+  fakeSavedValid = false;
+}
+
 // The list row's percentage must be right-aligned by measuring its actual
 // width, not a fixed cursor offset -- a fixed offset is only ever correct
 // for one string length, and "0%" (2 chars) and a two-digit percentage
@@ -496,6 +584,7 @@ int main() {
   testDrawCoverPlaceholderLegibility();
   testReadingProgressPercent();
   testControlsVisibleSurvivesRejectedTurn();
+  testResumeRebuildsPageHistory();
   testListRowPercentRightAligned();
   testLibraryGridNoDuplicateCaption();
   testStorePacking();

@@ -16,8 +16,9 @@ enum ReadingAction : uint8_t {
 // tested on the host.
 ReadingAction readingHitTest(int16_t x, int16_t y, bool controlsVisible);
 
-// Switches to book `index`, at the start (or its saved position once
-// persistence exists).
+// Switches to book `index`, at its saved position if it has one, otherwise at
+// the start. Resuming replays pagination from the start of the book, so the
+// restored page keeps its real page number and can still be turned back.
 void readingOpenBook(uint8_t index);
 
 // How far through `book` the reader has got, 0-100. Books never opened read 0.
