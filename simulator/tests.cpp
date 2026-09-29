@@ -2,6 +2,7 @@
 // cover scaling. Run with `make test`.
 #include <cstdio>
 #include "Arduino.h"
+#include "books.h"
 #include "epd.h"
 #include "reading.h"
 
@@ -41,8 +42,24 @@ static void testReadingHitTest() {
   CHECK_EQ(readingHitTest(479), READ_NEXT);
 }
 
+static void testBookTable() {
+  CHECK_EQ(BOOK_COUNT, 4);
+  for (uint8_t i = 0; i < BOOK_COUNT; i++) {
+    CHECK(BOOKS[i].title != nullptr && BOOKS[i].title[0] != '\0');
+    CHECK(BOOKS[i].author != nullptr && BOOKS[i].author[0] != '\0');
+    CHECK(BOOKS[i].text != nullptr);
+    // Long enough to paginate to more than one page.
+    CHECK(strlen(BOOKS[i].text) > 1200);
+  }
+  // Titles are distinct, so the library never shows two identical cells.
+  for (uint8_t i = 0; i < BOOK_COUNT; i++)
+    for (uint8_t j = i + 1; j < BOOK_COUNT; j++)
+      CHECK(strcmp(BOOKS[i].title, BOOKS[j].title) != 0);
+}
+
 int main() {
   testReadingHitTest();
+  testBookTable();
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;

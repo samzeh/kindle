@@ -17,7 +17,7 @@ HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp
 READER_SOURCES := $(filter-out $(HARDWARE_ONLY),$(wildcard $(READER)/*.cpp))
 
 SOURCES := main.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp
-HEADERS := $(wildcard shim/*.h) $(wildcard $(READER)/*.h)
+HEADERS := $(wildcard shim/*.h) $(wildcard $(READER)/*.h) $(wildcard $(READER)/*/*.h)
 
 reader-sim: $(SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@ $(LDLIBS)
