@@ -25,7 +25,17 @@ reader-sim: $(SOURCES) $(HEADERS)
 run: reader-sim
 	./reader-sim
 
-clean:
-	rm -f reader-sim
+# Host tests for the pure layout and hit-testing arithmetic. No SDL, no
+# main.cpp, so tests.cpp stands in for the screen driver and Serial.
+TESTFLAGS := -std=c++17 -O1 -DARDUINO=100 -Ishim -I$(READER) -I$(GFX)
 
-.PHONY: run clean
+reader-tests: tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp $(HEADERS)
+	$(CXX) $(TESTFLAGS) tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp -o $@
+
+test: reader-tests
+	./reader-tests
+
+clean:
+	rm -f reader-sim reader-tests
+
+.PHONY: run test clean

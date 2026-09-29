@@ -1,0 +1,22 @@
+// The reading screen: which page of which book is showing, and what a tap
+// does. No hardware code, so the simulator runs it too.
+#pragma once
+#include <stdint.h>
+
+enum ReadingAction : uint8_t {
+  READ_NONE,
+  READ_PREV,
+  READ_NEXT,
+};
+
+// Which action a tap at screen x maps to. Pure, so it is tested on the host.
+ReadingAction readingHitTest(int16_t x);
+
+// Draws the current page.
+void readingShow(bool fullRefresh);
+
+// A tap in screen coordinates.
+void readingTap(int16_t x, int16_t y);
+
+// +1 = next page, -1 = previous page.
+void readingTurnPage(int delta);
