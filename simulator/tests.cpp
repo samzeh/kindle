@@ -118,10 +118,60 @@ static void testLibraryGridHitTest() {
   // Left of the first column, inside the margin, opens nothing.
   CHECK_EQ(libraryHitTest(10, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
+  // Cell and header boundaries, each pair "last pixel inside" then "first
+  // pixel outside".
+  CHECK_EQ(libraryHitTest(227, 200, 0, LIB_VIEW_GRID).book, 0);           // col 0 right edge
+  CHECK_EQ(libraryHitTest(228, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(251, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);  // col 1 left edge
+  CHECK_EQ(libraryHitTest(252, 200, 0, LIB_VIEW_GRID).book, 1);
+  CHECK_EQ(libraryHitTest(455, 200, 0, LIB_VIEW_GRID).book, 1);           // col 1 right edge
+  CHECK_EQ(libraryHitTest(456, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(126, 403, 0, LIB_VIEW_GRID).book, 0);           // row 0 bottom edge
+  CHECK_EQ(libraryHitTest(126, 404, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(126, 407, 0, LIB_VIEW_GRID).action, LIB_NONE);  // row 1 top edge
+  CHECK_EQ(libraryHitTest(126, 408, 0, LIB_VIEW_GRID).book, 2);
+  CHECK_EQ(libraryHitTest(383, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);   // toggle edge
+  CHECK_EQ(libraryHitTest(384, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
+
   // Footer paging.
   CHECK_EQ(libraryHitTest(50, 780, 0, LIB_VIEW_GRID).action, LIB_PREV_PAGE);
   CHECK_EQ(libraryHitTest(400, 780, 0, LIB_VIEW_GRID).action, LIB_NEXT_PAGE);
   CHECK_EQ(libraryHitTest(240, 780, 0, LIB_VIEW_GRID).action, LIB_NONE);
+}
+
+static void testLibraryListHitTest() {
+  // Six rows of 118px starting at y = 50.
+  LibraryHit first = libraryHitTest(240, 80, 0, LIB_VIEW_LIST);
+  CHECK_EQ(first.action, LIB_OPEN_BOOK);
+  CHECK_EQ(first.book, 0);
+
+  LibraryHit second = libraryHitTest(240, 200, 0, LIB_VIEW_LIST);
+  CHECK_EQ(second.action, LIB_OPEN_BOOK);
+  CHECK_EQ(second.book, 1);
+
+  LibraryHit fourth = libraryHitTest(240, 440, 0, LIB_VIEW_LIST);
+  CHECK_EQ(fourth.action, LIB_OPEN_BOOK);
+  CHECK_EQ(fourth.book, 3);
+
+  // Rows past the end of the shelf open nothing.
+  CHECK_EQ(libraryHitTest(240, 560, 0, LIB_VIEW_LIST).action, LIB_NONE);
+
+  // The header and footer behave the same in both views.
+  CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_LIST).action, LIB_TOGGLE_VIEW);
+  CHECK_EQ(libraryHitTest(400, 780, 0, LIB_VIEW_LIST).action, LIB_NEXT_PAGE);
+
+  // Four books still fit on one page in list view.
+  CHECK_EQ(libraryPageCount(LIB_VIEW_LIST), 1);
+
+  // Row boundaries (rows are 118px starting at y = 50): row 0's last pixel
+  // (167) vs row 1's first pixel (168).
+  CHECK_EQ(libraryHitTest(240, 167, 0, LIB_VIEW_LIST).book, 0);
+  CHECK_EQ(libraryHitTest(240, 168, 0, LIB_VIEW_LIST).book, 1);
+
+  // The last valid row (row 3, book index 3, y 404-521) vs the first row
+  // past the shelf (row 4 would be index 4, but BOOK_COUNT == 4).
+  CHECK_EQ(libraryHitTest(240, 521, 0, LIB_VIEW_LIST).book, 3);
+  CHECK_EQ(libraryHitTest(240, 522, 0, LIB_VIEW_LIST).action, LIB_NONE);
 }
 
 static void testDrawCoverPixels() {
@@ -225,6 +275,7 @@ int main() {
   testBookTable();
   testCoverScaling();
   testLibraryGridHitTest();
+  testLibraryListHitTest();
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
   testLibraryGridNoDuplicateCaption();

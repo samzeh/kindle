@@ -3,10 +3,12 @@
 //
 //   click          tap (left third = previous page, rest = next page)
 //   right / left   next / previous page (also n / p)
+//   v              toggle the library view (grid / list)
 //   Esc / q        quit
 //
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
-// p = previous), saves the screen to page.bmp and exits.
+// p = previous, v = toggle the library view), saves the screen to page.bmp
+// and exits.
 #include <SDL.h>
 #include <vector>
 
@@ -121,7 +123,10 @@ int main(int argc, char **argv) {
   appBegin();
 
   if (screenshotFile) {
-    for (const char *c = screenshotTurns; *c; c++) appTurnPage(*c == 'p' ? -1 : 1);
+    for (const char *c = screenshotTurns; *c; c++) {
+      if (*c == 'v') appTap(400, 20);
+      else appTurnPage(*c == 'p' ? -1 : 1);
+    }
     SDL_Surface *shot = SDL_CreateRGBSurfaceWithFormatFrom(
       pixels.data(), SCREEN_W, SCREEN_H, 32, SCREEN_W * sizeof(uint32_t), SDL_PIXELFORMAT_ARGB8888);
     SDL_SaveBMP(shot, screenshotFile);
@@ -130,7 +135,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, q to quit.\n");
+  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, v to toggle library view, q to quit.\n");
 
   SDL_Event event;
   while (SDL_WaitEvent(&event)) {
@@ -147,6 +152,7 @@ int main(int argc, char **argv) {
       switch (event.key.keysym.sym) {
         case SDLK_RIGHT: case SDLK_n: case SDLK_SPACE: appTurnPage(1); break;
         case SDLK_LEFT: case SDLK_p: appTurnPage(-1); break;
+        case SDLK_v: appTap(400, 20); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }

@@ -26,11 +26,19 @@ static const int16_t GRID_COL_X[2] = { 24, 252 };
 static const int16_t GRID_ROW_Y[2] = { 54, 408 };
 static const int16_t GRID_CELL_H = 350;  // cover 306 + gap 6 + title 20 + author 18
 
+// List: six rows, thumbnail then title, author and a progress bar.
+static const int16_t LIST_PER_PAGE = 6;
+static const int16_t LIST_TOP = 50;
+static const int16_t LIST_ROW_H = 118;
+static const int16_t LIST_TEXT_X = 112;   // MARGIN_X + THUMB_W + 16
+static const int16_t LIST_BAR_W = 280;
+static const int16_t LIST_BAR_H = 8;
+
 static uint8_t view = LIB_VIEW_GRID;
 static uint8_t page = 0;
 
 uint8_t libraryPageCount(uint8_t v) {
-  int16_t perPage = v == LIB_VIEW_GRID ? GRID_PER_PAGE : 6;
+  int16_t perPage = v == LIB_VIEW_GRID ? GRID_PER_PAGE : LIST_PER_PAGE;
   return (uint8_t)((BOOK_COUNT + perPage - 1) / perPage);
 }
 
@@ -47,6 +55,16 @@ static LibraryHit gridHitTest(int16_t x, int16_t y, uint8_t p) {
   return { LIB_NONE, 0 };
 }
 
+static LibraryHit listHitTest(int16_t x, int16_t y, uint8_t p) {
+  (void)x;  // a row is hit anywhere across its width
+  if (y < LIST_TOP) return { LIB_NONE, 0 };
+  int16_t row = (y - LIST_TOP) / LIST_ROW_H;
+  if (row < 0 || row >= LIST_PER_PAGE) return { LIB_NONE, 0 };
+  uint8_t index = (uint8_t)(p * LIST_PER_PAGE + row);
+  if (index >= BOOK_COUNT) return { LIB_NONE, 0 };
+  return { LIB_OPEN_BOOK, index };
+}
+
 LibraryHit libraryHitTest(int16_t x, int16_t y, uint8_t p, uint8_t v) {
   if (y < HEADER_H) {
     return x >= TOGGLE_X ? LibraryHit{ LIB_TOGGLE_VIEW, 0 } : LibraryHit{ LIB_NONE, 0 };
@@ -57,7 +75,7 @@ LibraryHit libraryHitTest(int16_t x, int16_t y, uint8_t p, uint8_t v) {
     return { LIB_NONE, 0 };
   }
   if (v == LIB_VIEW_GRID) return gridHitTest(x, y, p);
-  return { LIB_NONE, 0 };  // list view arrives in Task 6
+  return listHitTest(x, y, p);
 }
 
 static void drawHeader(Adafruit_GFX &gfx) {
@@ -109,12 +127,51 @@ static void drawGrid(Adafruit_GFX &gfx) {
   }
 }
 
+// The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so
+// drawCover renders it as a frame only (no placeholder title/author). So,
+// unlike the grid, the row's title/author/progress are drawn here for every
+// book regardless of cover art -- they are the only place that text appears.
+static void drawList(Adafruit_GFX &gfx) {
+  for (uint8_t row = 0; row < LIST_PER_PAGE; row++) {
+    uint8_t index = (uint8_t)(page * LIST_PER_PAGE + row);
+    if (index >= BOOK_COUNT) break;
+    int16_t top = LIST_TOP + row * LIST_ROW_H;
+
+    drawCover(gfx, BOOKS[index], MARGIN_X, top + 5, THUMB_W, THUMB_H);
+
+    gfx.setTextColor(INK);
+    gfx.setFont(&FreeSerifBold9pt7b);
+    gfx.setCursor(LIST_TEXT_X, top + 30);
+    gfx.print(BOOKS[index].title);
+
+    gfx.setFont(&FreeSerif9pt7b);
+    gfx.setCursor(LIST_TEXT_X, top + 54);
+    gfx.print(BOOKS[index].author);
+
+    uint32_t pct = readingProgressPercent(index);
+    int16_t barY = top + 72;
+    gfx.drawRect(LIST_TEXT_X, barY, LIST_BAR_W, LIST_BAR_H, INK);
+    int16_t filled = (int16_t)((LIST_BAR_W - 2) * pct / 100);
+    if (filled > 0) gfx.fillRect(LIST_TEXT_X + 1, barY + 1, filled, LIST_BAR_H - 2, INK);
+
+    char label[8];
+    snprintf(label, sizeof(label), "%u%%", (unsigned)pct);
+    gfx.setCursor(SCREEN_W - MARGIN_X - 36, barY + LIST_BAR_H);
+    gfx.print(label);
+
+    if (row + 1 < LIST_PER_PAGE && (uint8_t)(index + 1) < BOOK_COUNT) {
+      gfx.drawFastHLine(MARGIN_X, top + LIST_ROW_H - 1, SCREEN_W - 2 * MARGIN_X, INK);
+    }
+  }
+}
+
 void libraryShow(bool fullRefresh) {
   GFXcanvas1 &gfx = appCanvas();
   gfx.fillScreen(PAPER);
   gfx.setTextWrap(false);
   drawHeader(gfx);
   if (view == LIB_VIEW_GRID) drawGrid(gfx);
+  else drawList(gfx);
   drawFooter(gfx);
   if (fullRefresh) epdShowFull(gfx.getBuffer());
   else epdShowPartial(gfx.getBuffer());

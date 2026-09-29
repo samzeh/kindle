@@ -5,6 +5,7 @@
 #include <Fonts/FreeSerifBold12pt7b.h>
 #include <Fonts/FreeSerifBoldItalic12pt7b.h>
 #include <Fonts/FreeSerif9pt7b.h>
+#include <string.h>
 #include <vector>
 
 #include "board_config.h"
@@ -41,10 +42,19 @@ void readingOpenBook(uint8_t index) {
   pageStarts.clear();
   pageStarts.push_back({ 0, false });
   currentPage = 0;
+  turnsSinceFullRefresh = 0;
 }
 
 ReadingAction readingHitTest(int16_t x) {
   return x < SCREEN_W / 3 ? READ_PREV : READ_NEXT;
+}
+
+uint32_t readingProgressPercent(uint8_t book) {
+  if (book >= BOOK_COUNT) return 0;
+  if (book != currentBook || pageStarts.empty()) return 0;
+  uint32_t len = (uint32_t)strlen(BOOKS[book].text);
+  if (len == 0) return 0;
+  return (uint32_t)((uint64_t)pageStarts[currentPage].offset * 100 / len);
 }
 
 void readingShow(bool fullRefresh) {

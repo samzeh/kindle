@@ -16,6 +16,9 @@ ReadingAction readingHitTest(int16_t x);
 // persistence exists).
 void readingOpenBook(uint8_t index);
 
+// How far through `book` the reader has got, 0-100. Books never opened read 0.
+uint32_t readingProgressPercent(uint8_t book);
+
 // Draws the current page.
 void readingShow(bool fullRefresh);
 
