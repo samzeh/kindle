@@ -253,6 +253,36 @@ static void testDrawCoverPlaceholderLegibility() {
   CHECK(!thumb.getPixel(THUMB_W - 1, THUMB_H - 1));
 }
 
+// Task 8 rewrites readingProgressPercent to read saved positions for every
+// book from NVS, instead of only the currently-showing book having one. This
+// test asserts the behaviour that must survive that rewrite -- ranges and
+// ordering, never an exact percentage, since the exact value is a function
+// of font metrics and page layout, not a contract worth pinning. It sits
+// here, after the pure arithmetic tests, because readingOpenBook and
+// readingTurnPage draw through the shared appCanvas() singleton and mutate
+// reading.cpp's statics.
+static void testReadingProgressPercent() {
+  // A book that has never been read reports 0.
+  CHECK_EQ(readingProgressPercent(2), 0);
+
+  // An out-of-range index reports 0 rather than reading past the table.
+  CHECK_EQ(readingProgressPercent(BOOK_COUNT), 0);
+  CHECK_EQ(readingProgressPercent(255), 0);
+
+  readingOpenBook(0);
+  readingShow(true);
+  CHECK_EQ(readingProgressPercent(0), 0);  // start of the book
+
+  readingTurnPage(1);
+  readingTurnPage(1);
+  uint32_t pct = readingProgressPercent(0);
+  CHECK(pct > 0);
+  CHECK(pct <= 100);
+
+  // A different book still reports 0 at this moment.
+  CHECK_EQ(readingProgressPercent(1), 0);
+}
+
 // Every current book has cover == nullptr, so drawCover's placeholder
 // already states title and author once inside the frame. The grid's own
 // caption band below the cover must stay blank in that case, or the text is
@@ -278,6 +308,7 @@ int main() {
   testLibraryListHitTest();
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
+  testReadingProgressPercent();
   testLibraryGridNoDuplicateCaption();
   if (failures) {
     printf("%d failure(s)\n", failures);
