@@ -45,8 +45,10 @@ void drawCover(Adafruit_GFX &gfx, const Book &book, int16_t x, int16_t y,
         if (coverBit(book.cover, sx, sy)) gfx.drawPixel(x + px, y + py, INK);
       }
     }
-  } else {
-    // No cover art: set the title and author inside the frame instead.
+  } else if (w >= COVER_TEXT_MIN_W) {
+    // No cover art, and room enough to letter it: set the title and author
+    // inside the frame instead. Below the legibility floor (e.g. a list-view
+    // thumbnail) the frame is left empty; the caller draws the caption.
     gfx.setTextColor(INK);
     gfx.setTextWrap(false);
     int16_t inset = 10;

@@ -96,11 +96,16 @@ static void drawGrid(Adafruit_GFX &gfx) {
     int16_t x = GRID_COL_X[cell % 2];
     int16_t y = GRID_ROW_Y[cell / 2];
     drawCover(gfx, BOOKS[index], x, y, COVER_W, COVER_H);
-    gfx.setTextColor(INK);
-    drawCentredText(gfx, BOOKS[index].title, &FreeSerifBold9pt7b, x, COVER_W,
-                    y + COVER_H + 20);
-    drawCentredText(gfx, BOOKS[index].author, &FreeSerif9pt7b, x, COVER_W,
-                    y + COVER_H + 38);
+    // Only caption books with real cover art: without it, drawCover's own
+    // typographic placeholder already states the title and author once,
+    // inside the frame, so a caption here would say it twice.
+    if (BOOKS[index].cover) {
+      gfx.setTextColor(INK);
+      drawCentredText(gfx, BOOKS[index].title, &FreeSerifBold9pt7b, x, COVER_W,
+                      y + COVER_H + 20);
+      drawCentredText(gfx, BOOKS[index].author, &FreeSerif9pt7b, x, COVER_W,
+                      y + COVER_H + 38);
+    }
   }
 }
 

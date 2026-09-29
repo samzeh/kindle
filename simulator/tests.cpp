@@ -7,6 +7,7 @@
 #include "epd.h"
 #include "library.h"
 #include "reading.h"
+#include "screens.h"
 
 SerialPort Serial;
 
@@ -169,12 +170,64 @@ static void testDrawCoverPixels() {
   CHECK(!fb.getPixel(COVER_W - 1, COVER_H - 1));   // opposite corner too
 }
 
+// drawCover's typographic placeholder writes title/author text inside the
+// frame only when the box clears the legibility floor. Below it (e.g. the
+// list view's 72px thumbnail), the caller draws the caption elsewhere, so
+// drawCover must draw the frame alone or the text is stated twice.
+static void testDrawCoverPlaceholderLegibility() {
+  const Book noArt = { "Title", "Author", "text", nullptr };
+
+  GFXcanvas1 full(COVER_W, COVER_H);
+  full.fillScreen(0xFFFF);
+  drawCover(full, noArt, 0, 0, COVER_W, COVER_H);
+  // At full width (well above the floor), some interior pixel is ink: the
+  // placeholder text is drawn.
+  bool fullHasInteriorInk = false;
+  for (int16_t y = 4; y < COVER_H - 4 && !fullHasInteriorInk; y++)
+    for (int16_t x = 4; x < COVER_W - 4; x++)
+      if (!full.getPixel(x, y)) { fullHasInteriorInk = true; break; }
+  CHECK(fullHasInteriorInk);
+
+  GFXcanvas1 thumb(THUMB_W, THUMB_H);
+  thumb.fillScreen(0xFFFF);
+  drawCover(thumb, noArt, 0, 0, THUMB_W, THUMB_H);
+  CHECK(THUMB_W < COVER_TEXT_MIN_W);  // this test only means something if so
+  // Below the floor: frame only, no interior ink.
+  bool thumbHasInteriorInk = false;
+  for (int16_t y = 1; y < THUMB_H - 1 && !thumbHasInteriorInk; y++)
+    for (int16_t x = 1; x < THUMB_W - 1; x++)
+      if (!thumb.getPixel(x, y)) { thumbHasInteriorInk = true; break; }
+  CHECK(!thumbHasInteriorInk);
+  // The frame itself is still drawn.
+  CHECK(!thumb.getPixel(0, 0));
+  CHECK(!thumb.getPixel(THUMB_W - 1, THUMB_H - 1));
+}
+
+// Every current book has cover == nullptr, so drawCover's placeholder
+// already states title and author once inside the frame. The grid's own
+// caption band below the cover must stay blank in that case, or the text is
+// stated twice. (Coordinates match library.cpp's private grid geometry: the
+// top-left cell starts at (24, 54); it is the one cell that stays inside the
+// unrotated test canvas without calling appBegin().)
+static void testLibraryGridNoDuplicateCaption() {
+  libraryShow(false);
+  GFXcanvas1 &gfx = appCanvas();
+  const int16_t cellX = 24, cellY = 54, cellH = 350;
+  bool inkBelowCover = false;
+  for (int16_t y = cellY + COVER_H + 1; y < cellY + cellH && !inkBelowCover; y++)
+    for (int16_t x = cellX; x < cellX + COVER_W; x++)
+      if (!gfx.getPixel(x, y)) { inkBelowCover = true; break; }
+  CHECK(!inkBelowCover);
+}
+
 int main() {
   testReadingHitTest();
   testBookTable();
   testCoverScaling();
   testLibraryGridHitTest();
   testDrawCoverPixels();
+  testDrawCoverPlaceholderLegibility();
+  testLibraryGridNoDuplicateCaption();
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;
