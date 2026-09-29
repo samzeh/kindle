@@ -15,6 +15,13 @@ static bool readRegs(uint8_t reg, uint8_t *buf, uint8_t len) {
   return true;
 }
 
+static bool writeReg(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(FT6336_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
 void touchBegin() {
   pinMode(PIN_TOUCH_INT, INPUT);
   pinMode(PIN_TOUCH_RST, OUTPUT);
@@ -23,21 +30,47 @@ void touchBegin() {
   digitalWrite(PIN_TOUCH_RST, HIGH);
   delay(300);  // FT6336 needs ~300 ms after reset before it answers on I2C
   Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL, 400000);
+
+  // Report whether the touch chip answers, to make wiring problems obvious.
+  uint8_t id;
+  if (readRegs(0xA3, &id, 1)) {
+    // Same settings as the vendor demo, whose touch response was good.
+    writeReg(0x00, 0);   // normal operating mode
+    writeReg(0x80, 22);  // touch threshold: lower = more sensitive
+    writeReg(0x88, 14);  // scan rate while touched (reports per second)
+    uint8_t threshold = 0, rate = 0;
+    readRegs(0x80, &threshold, 1);
+    readRegs(0x88, &rate, 1);
+    Serial.printf("touch: chip found, id 0x%02X, threshold %u, rate %u\n", id, threshold, rate);
+    return;
+  }
+  Serial.printf("touch: no answer at 0x%02X (SDA=%d, SCL=%d). Devices found:", FT6336_ADDR,
+                PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) Serial.printf(" 0x%02X", addr);
+  }
+  Serial.println();
 }
 
-bool touchGetTap(uint16_t &x, uint16_t &y) {
-  static bool wasDown = false;
+static bool wasDown = false;
 
-  if (digitalRead(PIN_TOUCH_INT) == HIGH) {  // no finger on the panel
+// Polls the chip over I2C rather than using the INT pin: on this board INT
+// only pulses briefly, so it cannot tell whether a finger is down.
+bool touchGetTap(uint16_t &x, uint16_t &y) {
+  uint8_t status;
+  if (!readRegs(REG_TD_STATUS, &status, 1)) return false;
+  uint8_t fingers = status & 0x0F;
+  bool down = fingers > 0 && fingers <= 2;  // the chip tracks at most 2 points
+  if (!down) {
     wasDown = false;
     return false;
   }
 
-  uint8_t status;
-  if (!readRegs(REG_TD_STATUS, &status, 1)) return false;
-  bool down = (status & 0x0F) > 0;
-  bool isNewPress = down && !wasDown;
-  wasDown = down;
+  // A tap is the moment the screen goes from untouched to touched; staying
+  // down (or the finger count changing) does not count again.
+  bool isNewPress = !wasDown;
+  wasDown = true;
   if (!isNewPress) return false;
 
   uint8_t p[4];

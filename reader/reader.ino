@@ -17,8 +17,9 @@
 #include "touch.h"
 #include "sample_text.h"
 
-// Fast refreshes leave faint ghosting; a full (flashing) refresh clears it.
-static const uint8_t FULL_REFRESH_EVERY = 10;
+// Page turns use the no-flash refresh, which leaves faint ghosting over time.
+// Set this to N to do a full (flashing) refresh every N turns; 0 = never.
+static const uint8_t FULL_REFRESH_EVERY = 0;
 
 // Full-screen buffer (48 KB): each page is drawn in RAM, then sent in one go.
 // Its memory layout matches the panel's, so it is sent unchanged.
@@ -53,7 +54,7 @@ void turnPage(int delta) {
   if (delta > 0 && currentPage + 1 >= pageStarts.size()) return;  // last page
   if (delta < 0 && currentPage == 0) return;
   currentPage += delta;
-  bool full = ++turnsSinceFullRefresh >= FULL_REFRESH_EVERY;
+  bool full = FULL_REFRESH_EVERY > 0 && ++turnsSinceFullRefresh >= FULL_REFRESH_EVERY;
   if (full) turnsSinceFullRefresh = 0;
   showPage(full);
 }
@@ -74,6 +75,13 @@ void setup() {
 }
 
 void loop() {
+  // Page turns can also be sent over USB serial: 'n' = next, 'p' = previous.
+  if (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'n') turnPage(1);
+    if (c == 'p') turnPage(-1);
+  }
+
   uint16_t x, y;
   if (touchGetTap(x, y)) {
     Serial.printf("tap at %u,%u\n", x, y);

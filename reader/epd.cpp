@@ -1,31 +1,47 @@
 #include "epd.h"
 #include "board_config.h"
+#include "soc/gpio_reg.h"
 
 static const uint32_t BUSY_TIMEOUT_MS = 10000;
 
-// ---- Software SPI, same timing as the vendor demo ----
+// ---- Software SPI ----
+// Same signal sequence as the vendor demo, but the pins are switched by
+// writing the ESP32's GPIO registers directly: digitalWrite() is slow
+// enough that sending one page took ~1.4 s.
+
+static_assert(PIN_EPD_SCK < 32 && PIN_EPD_MOSI < 32 && PIN_EPD_CS < 32 && PIN_EPD_DC < 32,
+              "fast pin writes below only handle GPIO 0-31");
+
+static inline void pinHigh(uint8_t pin) {
+  REG_WRITE(GPIO_OUT_W1TS_REG, 1UL << pin);
+}
+
+static inline void pinLow(uint8_t pin) {
+  REG_WRITE(GPIO_OUT_W1TC_REG, 1UL << pin);
+}
 
 static void spiWrite(uint8_t value) {
   for (uint8_t i = 0; i < 8; i++) {
-    digitalWrite(PIN_EPD_SCK, LOW);
-    digitalWrite(PIN_EPD_MOSI, (value & 0x80) ? HIGH : LOW);
+    pinLow(PIN_EPD_SCK);
+    if (value & 0x80) pinHigh(PIN_EPD_MOSI);
+    else pinLow(PIN_EPD_MOSI);
     value <<= 1;
-    digitalWrite(PIN_EPD_SCK, HIGH);
+    pinHigh(PIN_EPD_SCK);
   }
 }
 
 static void writeCommand(uint8_t command) {
-  digitalWrite(PIN_EPD_CS, LOW);
-  digitalWrite(PIN_EPD_DC, LOW);
+  pinLow(PIN_EPD_CS);
+  pinLow(PIN_EPD_DC);
   spiWrite(command);
-  digitalWrite(PIN_EPD_CS, HIGH);
+  pinHigh(PIN_EPD_CS);
 }
 
 static void writeData(uint8_t data) {
-  digitalWrite(PIN_EPD_CS, LOW);
-  digitalWrite(PIN_EPD_DC, HIGH);
+  pinLow(PIN_EPD_CS);
+  pinHigh(PIN_EPD_DC);
   spiWrite(data);
-  digitalWrite(PIN_EPD_CS, HIGH);
+  pinHigh(PIN_EPD_CS);
 }
 
 // CS is toggled for every byte, as in the vendor demo.
@@ -286,10 +302,18 @@ void epdShowFull(const uint8_t *image) {
   writeCommand(0x22);  // display update using the loaded waveform
   writeData(0xC7);
   writeCommand(0x20);
+  uint32_t start = millis();
   waitWhileBusy("full refresh");
+  // A temperature of 255 and a ~0 ms refresh mean the panel did not respond.
+  Serial.printf("epd: full refresh %lu ms, panel temperature %d C\n", millis() - start, temp);
 }
 
 void epdShowPartial(const uint8_t *image) {
+  // Same preamble as the vendor demo's partial update. The reset keeps the
+  // controller's image RAM, so 0x26 still holds the previous page.
+  hardwareReset();
+  writeCommand(0x18);  // internal temperature sensor
+  writeData(0x80);
   writeCommand(0x3C);  // border: keep as is
   writeData(0x80);
   setFullWindow();
@@ -298,7 +322,9 @@ void epdShowPartial(const uint8_t *image) {
   writeCommand(0x22);  // partial update (panel's built-in waveform)
   writeData(0xFF);
   writeCommand(0x20);
+  uint32_t start = millis();
   waitWhileBusy("partial refresh");
+  Serial.printf("epd: partial refresh %lu ms\n", millis() - start);
 
   // Now on screen: store it as the "previous" image for the next update.
   setFullWindow();
