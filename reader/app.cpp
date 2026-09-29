@@ -6,6 +6,7 @@
 #include "library.h"
 #include "reading.h"
 #include "screens.h"
+#include "store.h"
 
 // Full-screen buffer (48 KB): each screen is drawn in RAM, then sent in one
 // go. Its memory layout matches the panel's, so it is sent unchanged.
@@ -29,6 +30,7 @@ void appGoTo(Screen s) {
 }
 
 void appBegin() {
+  storeBegin();
   canvas.setRotation(SCREEN_ROTATION);
   appGoTo(SCREEN_LIBRARY);
 }

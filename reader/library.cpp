@@ -9,6 +9,7 @@
 #include "epd.h"
 #include "reading.h"
 #include "screens.h"
+#include "store.h"
 
 static const uint16_t INK = 0x0000;
 static const uint16_t PAPER = 0xFFFF;
@@ -38,6 +39,7 @@ static const int16_t LIST_TEXT_MAX_W = SCREEN_W - MARGIN_X - LIST_TEXT_X;  // 34
 
 static uint8_t view = LIB_VIEW_GRID;
 static uint8_t page = 0;
+static bool viewLoaded = false;
 
 uint8_t libraryPageCount(uint8_t v) {
   int16_t perPage = v == LIB_VIEW_GRID ? GRID_PER_PAGE : LIST_PER_PAGE;
@@ -175,7 +177,21 @@ static void drawList(Adafruit_GFX &gfx) {
   }
 }
 
+// Loads the persisted view on first use. Called from both libraryShow and
+// libraryTap: on the device, appBegin's initial libraryShow always runs
+// before any tap can arrive, but a caller that taps first (as the host tests
+// do, driving libraryTap directly without ever calling appBegin) must not
+// have that first tap's LIB_TOGGLE_VIEW clobbered by a load that runs after
+// the toggle already flipped `view`.
+static void ensureViewLoaded() {
+  if (!viewLoaded) {
+    view = storeLoadView();
+    viewLoaded = true;
+  }
+}
+
 void libraryShow(bool fullRefresh) {
+  ensureViewLoaded();
   GFXcanvas1 &gfx = appCanvas();
   gfx.fillScreen(PAPER);
   gfx.setTextWrap(false);
@@ -196,6 +212,7 @@ void libraryTurnPage(int delta) {
 }
 
 void libraryTap(int16_t x, int16_t y) {
+  ensureViewLoaded();
   LibraryHit hit = libraryHitTest(x, y, page, view);
   switch (hit.action) {
     case LIB_OPEN_BOOK:
@@ -206,6 +223,7 @@ void libraryTap(int16_t x, int16_t y) {
     case LIB_NEXT_PAGE: libraryTurnPage(1); break;
     case LIB_TOGGLE_VIEW:
       view = view == LIB_VIEW_GRID ? LIB_VIEW_LIST : LIB_VIEW_GRID;
+      storeSaveView(view);
       page = 0;
       libraryShow(true);
       break;

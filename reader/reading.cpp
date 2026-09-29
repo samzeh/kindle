@@ -15,6 +15,7 @@
 #include "epd.h"
 #include "layout.h"
 #include "screens.h"
+#include "store.h"
 
 // Page turns use the no-flash refresh, which leaves faint ghosting over time.
 // Set this to N to do a full (flashing) refresh every N turns; 0 = never.
@@ -45,10 +46,20 @@ void readingOpenBook(uint8_t index) {
   delete layout;
   layout = new PageLayout(appCanvas(), BOOKS[index].text, fonts);
   pageStarts.clear();
-  pageStarts.push_back({ 0, false });
+
+  uint32_t offset = 0;
+  bool italic = false;
+  storeLoadProgress(index, offset, italic);
+  pageStarts.push_back({ offset, italic });
   currentPage = 0;
   turnsSinceFullRefresh = 0;
   controlsVisible = false;
+}
+
+static void saveProgress() {
+  if (pageStarts.empty()) return;
+  storeSaveProgress(currentBook, pageStarts[currentPage].offset,
+                    pageStarts[currentPage].italic);
 }
 
 ReadingAction readingHitTest(int16_t x, int16_t y, bool barUp) {
@@ -63,10 +74,17 @@ ReadingAction readingHitTest(int16_t x, int16_t y, bool barUp) {
 
 uint32_t readingProgressPercent(uint8_t book) {
   if (book >= BOOK_COUNT) return 0;
-  if (book != currentBook || pageStarts.empty()) return 0;
   uint32_t len = (uint32_t)strlen(BOOKS[book].text);
   if (len == 0) return 0;
-  return (uint32_t)((uint64_t)pageStarts[currentPage].offset * 100 / len);
+
+  uint32_t offset = 0;
+  bool italic = false;
+  if (book == currentBook && !pageStarts.empty()) {
+    offset = pageStarts[currentPage].offset;
+  } else if (!storeLoadProgress(book, offset, italic)) {
+    return 0;
+  }
+  return (uint32_t)((uint64_t)offset * 100 / len);
 }
 
 // Draws the control bar over the top BAR_H pixels of the current page: a
@@ -109,6 +127,7 @@ void readingTurnPage(int delta) {
   bool full = FULL_REFRESH_EVERY > 0 && ++turnsSinceFullRefresh >= FULL_REFRESH_EVERY;
   if (full) turnsSinceFullRefresh = 0;
   readingShow(full);
+  saveProgress();
 }
 
 void readingTap(int16_t x, int16_t y) {
@@ -125,6 +144,7 @@ void readingTap(int16_t x, int16_t y) {
       break;
     case READ_BACK_TO_LIBRARY:
       controlsVisible = false;
+      saveProgress();
       appGoTo(SCREEN_LIBRARY);
       break;
     default: break;

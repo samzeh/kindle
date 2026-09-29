@@ -30,6 +30,7 @@ make run
 | Left arrow, `p` | Previous page |
 | `v` | Toggle the library view (grid / list) |
 | `l` | Back to the library (opens the control bar, then taps its back arrow) |
+| `o` | Open book 0 (taps the grid's top-left cover) -- a fixed-point convenience for headless verification, not a general book picker |
 | `q` or Esc | Quit |
 
 `make run` rebuilds automatically when the reader code has changed. What the

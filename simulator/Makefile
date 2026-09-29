@@ -13,7 +13,7 @@ LDLIBS := $(shell sdl2-config --libs)
 # except the hardware drivers: main.cpp stands in for those. A new reader file
 # that talks to hardware (e.g. an SD card driver) belongs on this list too,
 # with a stand-in added to main.cpp.
-HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp
+HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp
 READER_SOURCES := $(filter-out $(HARDWARE_ONLY),$(wildcard $(READER)/*.cpp))
 
 SOURCES := main.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp

@@ -5,11 +5,12 @@
 //   right / left   next / previous page (also n / p)
 //   v              toggle the library view (grid / list)
 //   l              back to the library, from inside a book
+//   o              open book 0 (taps the grid's top-left cover), from the library
 //   Esc / q        quit
 //
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
-// p = previous, v = toggle the library view, l = back to the library), saves
-// the screen to page.bmp and exits.
+// p = previous, v = toggle the library view, l = back to the library, o =
+// open book 0), saves the screen to page.bmp and exits.
 #include <SDL.h>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "app.h"
 #include "board_config.h"
 #include "epd.h"
+#include "store.h"
 
 SerialPort Serial;
 
@@ -88,6 +90,55 @@ void epdShowPartial(const uint8_t *image) {
 
 void epdSleep() {}
 
+// ---- Stand-in for NVS (reader/store.h), backed by a file ----
+
+static const char *STATE_FILE = "reader-sim.state";
+static const int MAX_BOOKS = 32;
+
+struct SimState {
+  uint32_t progress[MAX_BOOKS];
+  bool saved[MAX_BOOKS];
+  uint8_t view;
+};
+
+static SimState simState = {};
+
+static void simStateWrite() {
+  FILE *f = fopen(STATE_FILE, "wb");
+  if (!f) return;
+  fwrite(&simState, sizeof(simState), 1, f);
+  fclose(f);
+}
+
+void storeBegin() {
+  FILE *f = fopen(STATE_FILE, "rb");
+  if (!f) return;
+  if (fread(&simState, sizeof(simState), 1, f) != 1) simState = SimState{};
+  fclose(f);
+}
+
+void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
+  if (book >= MAX_BOOKS) return;
+  simState.progress[book] = storePack(offset, italic);
+  simState.saved[book] = true;
+  simStateWrite();
+}
+
+bool storeLoadProgress(uint8_t book, uint32_t &offset, bool &italic) {
+  if (book >= MAX_BOOKS || !simState.saved[book]) return false;
+  storeUnpack(simState.progress[book], offset, italic);
+  return true;
+}
+
+void storeSaveView(uint8_t view) {
+  simState.view = view;
+  simStateWrite();
+}
+
+uint8_t storeLoadView() {
+  return simState.view;
+}
+
 // ---- Window and input ----
 
 // Turns one input character into the app action it stands for: shared by the
@@ -98,6 +149,11 @@ static void simKey(char key) {
   switch (key) {
     case 'v': appTap(400, 20); break;                          // toggle library view
     case 'l': appTap(240, 400); appTap(40, 30); break;          // controls, then back
+    // Taps the centre of the grid's top-left cell (column 0 starts at
+    // x=24, row 0 at y=54, each cell 204 x 350), which always hits book 0.
+    // A convenience for headless verification of a fixed point, not a
+    // general "book picker".
+    case 'o': appTap(126, 200); break;
     default: appTurnPage(key == 'p' ? -1 : 1); break;
   }
 }
@@ -146,7 +202,8 @@ int main(int argc, char **argv) {
   }
 
   printf("Click to tap (left third = back), arrow keys or n/p to turn pages, "
-         "v to toggle library view, l to return to the library, q to quit.\n");
+         "v to toggle library view, l to return to the library, o to open "
+         "book 0, q to quit.\n");
 
   SDL_Event event;
   while (SDL_WaitEvent(&event)) {
@@ -165,6 +222,7 @@ int main(int argc, char **argv) {
         case SDLK_LEFT: case SDLK_p: simKey('p'); break;
         case SDLK_v: simKey('v'); break;
         case SDLK_l: simKey('l'); break;
+        case SDLK_o: simKey('o'); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }

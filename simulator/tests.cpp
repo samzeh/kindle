@@ -8,6 +8,7 @@
 #include "library.h"
 #include "reading.h"
 #include "screens.h"
+#include "store.h"
 #include <Fonts/FreeSerifBold9pt7b.h>
 
 SerialPort Serial;
@@ -17,6 +18,19 @@ void epdBegin() {}
 void epdShowFull(const uint8_t *) {}
 void epdShowPartial(const uint8_t *) {}
 void epdSleep() {}
+
+// ---- Stand-ins for persistence (reader/store.h) ----
+// store.cpp is hardware-only (real NVS via Preferences), so it is not linked
+// into this target, but reading.cpp and library.cpp call into it regardless.
+// A no-op is enough here: the host tests exercise readingProgressPercent's
+// behaviour through reading.cpp's own in-memory state (pageStarts), not
+// through persistence, and must not read or write a state file on disk --
+// that would make them order- and history-dependent.
+void storeBegin() {}
+void storeSaveProgress(uint8_t, uint32_t, bool) {}
+bool storeLoadProgress(uint8_t, uint32_t &, bool &) { return false; }
+void storeSaveView(uint8_t) {}
+uint8_t storeLoadView() { return 0; }
 
 // ---- Tiny test framework ----
 static int failures = 0;
@@ -438,6 +452,28 @@ static void testListRowPercentRightAligned() {
 // stated twice. (Coordinates match library.cpp's private grid geometry: the
 // top-left cell starts at (24, 54); it is the one cell that stays inside the
 // unrotated test canvas without calling appBegin().)
+static void testStorePacking() {
+  uint32_t offset;
+  bool italic;
+
+  storeUnpack(storePack(0, false), offset, italic);
+  CHECK_EQ(offset, 0);
+  CHECK(!italic);
+
+  storeUnpack(storePack(0, true), offset, italic);
+  CHECK_EQ(offset, 0);
+  CHECK(italic);
+
+  storeUnpack(storePack(123456, true), offset, italic);
+  CHECK_EQ(offset, 123456);
+  CHECK(italic);
+
+  // The largest offset that survives the round trip.
+  storeUnpack(storePack(0x7FFFFFFF, false), offset, italic);
+  CHECK_EQ(offset, 0x7FFFFFFF);
+  CHECK(!italic);
+}
+
 static void testLibraryGridNoDuplicateCaption() {
   libraryShow(false);
   GFXcanvas1 &gfx = appCanvas();
@@ -462,6 +498,7 @@ int main() {
   testControlsVisibleSurvivesRejectedTurn();
   testListRowPercentRightAligned();
   testLibraryGridNoDuplicateCaption();
+  testStorePacking();
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;
