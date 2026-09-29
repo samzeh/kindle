@@ -57,6 +57,12 @@ static void testReadingHitTest() {
   CHECK_EQ(readingHitTest(240, 400, true), READ_HIDE_CONTROLS);
   CHECK_EQ(readingHitTest(10, 400, true), READ_HIDE_CONTROLS);
 
+  // The bar's bottom edge (BAR_H = 64): last row inside vs. first row below,
+  // both well within the back arrow's x range so only the y boundary is
+  // exercised.
+  CHECK_EQ(readingHitTest(10, 63, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(10, 64, true), READ_HIDE_CONTROLS);
+
   // The back arrow only counts inside the bar, not down the left edge.
   CHECK_EQ(readingHitTest(10, 65, true), READ_HIDE_CONTROLS);
 }

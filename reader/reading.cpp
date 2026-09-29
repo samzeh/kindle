@@ -48,6 +48,7 @@ void readingOpenBook(uint8_t index) {
   pageStarts.push_back({ 0, false });
   currentPage = 0;
   turnsSinceFullRefresh = 0;
+  controlsVisible = false;
 }
 
 ReadingAction readingHitTest(int16_t x, int16_t y, bool barUp) {

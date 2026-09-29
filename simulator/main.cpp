@@ -90,6 +90,18 @@ void epdSleep() {}
 
 // ---- Window and input ----
 
+// Turns one input character into the app action it stands for: shared by the
+// interactive key handler and the --screenshot sequence parser, so a key
+// added to one is never missing from the other. Unrecognised characters
+// (and 'n') turn the page forward; 'p' turns it back.
+static void simKey(char key) {
+  switch (key) {
+    case 'v': appTap(400, 20); break;                          // toggle library view
+    case 'l': appTap(240, 400); appTap(40, 30); break;          // controls, then back
+    default: appTurnPage(key == 'p' ? -1 : 1); break;
+  }
+}
+
 int main(int argc, char **argv) {
   const char *screenshotFile = nullptr;
   const char *screenshotTurns = "";
@@ -124,11 +136,7 @@ int main(int argc, char **argv) {
   appBegin();
 
   if (screenshotFile) {
-    for (const char *c = screenshotTurns; *c; c++) {
-      if (*c == 'v') appTap(400, 20);
-      else if (*c == 'l') { appTap(240, 400); appTap(40, 30); }  // controls, then back
-      else appTurnPage(*c == 'p' ? -1 : 1);
-    }
+    for (const char *c = screenshotTurns; *c; c++) simKey(*c);
     SDL_Surface *shot = SDL_CreateRGBSurfaceWithFormatFrom(
       pixels.data(), SCREEN_W, SCREEN_H, 32, SCREEN_W * sizeof(uint32_t), SDL_PIXELFORMAT_ARGB8888);
     SDL_SaveBMP(shot, screenshotFile);
@@ -137,7 +145,8 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, v to toggle library view, q to quit.\n");
+  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, "
+         "v to toggle library view, l to return to the library, q to quit.\n");
 
   SDL_Event event;
   while (SDL_WaitEvent(&event)) {
@@ -152,9 +161,10 @@ int main(int argc, char **argv) {
     }
     if (event.type == SDL_KEYDOWN) {
       switch (event.key.keysym.sym) {
-        case SDLK_RIGHT: case SDLK_n: case SDLK_SPACE: appTurnPage(1); break;
-        case SDLK_LEFT: case SDLK_p: appTurnPage(-1); break;
-        case SDLK_v: appTap(400, 20); break;
+        case SDLK_RIGHT: case SDLK_n: case SDLK_SPACE: simKey('n'); break;
+        case SDLK_LEFT: case SDLK_p: simKey('p'); break;
+        case SDLK_v: simKey('v'); break;
+        case SDLK_l: simKey('l'); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }
