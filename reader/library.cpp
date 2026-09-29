@@ -2,7 +2,7 @@
 #include <Adafruit_GFX.h>
 #include <Fonts/FreeSerif9pt7b.h>
 #include <Fonts/FreeSerifBold9pt7b.h>
-#include <string.h>
+#include <stdio.h>  // snprintf, for the footer and list progress labels
 
 #include "books.h"
 #include "cover.h"

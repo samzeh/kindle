@@ -547,12 +547,9 @@ static void testListRowPercentRightAligned() {
   libraryTap(400, 20);  // header toggle: list -> grid, restore state
 }
 
-// Every current book has cover == nullptr, so drawCover's placeholder
-// already states title and author once inside the frame. The grid's own
-// caption band below the cover must stay blank in that case, or the text is
-// stated twice. (Coordinates match library.cpp's private grid geometry: the
-// top-left cell starts at (24, 54); it is the one cell that stays inside the
-// unrotated test canvas without calling appBegin().)
+// storePack/storeUnpack are inline in store.h precisely so they stay testable
+// on the host: store.cpp itself is hardware-only and never linked in here.
+// Pure arithmetic, so this is free to run anywhere in the order.
 static void testStorePacking() {
   uint32_t offset;
   bool italic;
@@ -575,6 +572,12 @@ static void testStorePacking() {
   CHECK(!italic);
 }
 
+// Every current book has cover == nullptr, so drawCover's placeholder already
+// states title and author once inside the frame. The grid's own caption band
+// below the cover must stay blank in that case, or the text is stated twice.
+// (Coordinates match library.cpp's private grid geometry: the top-left cell
+// starts at (24, 54); it is the one cell that stays inside the unrotated test
+// canvas without calling appBegin().)
 static void testLibraryGridNoDuplicateCaption() {
   libraryShow(false);
   GFXcanvas1 &gfx = appCanvas();
@@ -586,7 +589,33 @@ static void testLibraryGridNoDuplicateCaption() {
   CHECK(!inkBelowCover);
 }
 
+// THE ORDER OF THE SECOND GROUP IS A CONSTRAINT, NOT A STYLE CHOICE.
+//
+// The first group is order-independent: those tests are pure functions, or they
+// render into their own throwaway canvases, and the library hit tests take the
+// view and page as arguments rather than reading the current one.
+//
+// The second group is not. Every test in it draws into the one shared
+// appCanvas() and mutates reading.cpp's and library.cpp's file statics --
+// current book, page history, controls-visible, grid-vs-list view -- so each
+// one inherits whatever the last one left behind. The dependencies that exist
+// today:
+//
+//   - testLibraryGridNoDuplicateCaption reads the shared canvas directly and
+//     needs the view to be grid, which is also the initial value. It must not
+//     run after anything that leaves the view on list.
+//   - testListRowPercentRightAligned toggles the view to list and back, so it
+//     is what makes the above hold -- and it is why it must restore grid on the
+//     way out, not merely why it must run before.
+//   - testResumeRebuildsPageHistory sets the fakeSaved* stand-in, and must
+//     clear it again, or every test after it resumes book 0 mid-text instead of
+//     opening it at page 1.
+//
+// Reorder these and the failure will look like a rendering bug and will not be
+// one. A new test that touches the canvas belongs at the end of this group,
+// before testStorePacking.
 int main() {
+  // Pure: hit-testing, table invariants, scaling, text measurement.
   testReadingHitTest();
   testBookTable();
   testCoverScaling();
@@ -595,12 +624,15 @@ int main() {
   testLibraryListHitTest();
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
+
+  // ---- Below here: shared canvas and screen statics. Order matters. ----
   testReadingProgressPercent();
   testControlsVisibleSurvivesRejectedTurn();
   testResumeRebuildsPageHistory();
   testListRowPercentRightAligned();
   testLibraryGridNoDuplicateCaption();
-  testStorePacking();
+
+  testStorePacking();  // pure again: independent of everything above
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;

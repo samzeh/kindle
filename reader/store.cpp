@@ -24,10 +24,10 @@ static void progressKey(uint8_t book, char *out, size_t n) {
 void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
   char key[8];
   progressKey(book, key, sizeof(key));
-  // NVS is expected to skip a write whose value is unchanged, so repeated
-  // saves at the same position should cost nothing -- but this is unverified
-  // here: store.cpp is hardware-only, and there is no ESP32 board on this
-  // machine to test it against.
+  // One page turn costs one NVS entry, not two: offset and italic travel
+  // packed into a single uint32 (see storePack, covered by testStorePacking),
+  // and each book has one key. That is what keeps the flash erase budget
+  // comfortable at reading speed.
   prefs.putUInt(key, storePack(offset, italic));
 }
 
