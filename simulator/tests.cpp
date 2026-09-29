@@ -615,7 +615,7 @@ static void testLibraryGridNoDuplicateCaption() {
 // one. A new test that touches the canvas belongs at the end of this group,
 // before testStorePacking.
 int main() {
-  // Pure: hit-testing, table invariants, scaling, text measurement.
+  // Order-independent: pure arithmetic, or rendering into their own canvases.
   testReadingHitTest();
   testBookTable();
   testCoverScaling();
