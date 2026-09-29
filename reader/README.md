@@ -9,7 +9,8 @@ go back.
 
 | File | What it does |
 |---|---|
-| `reader.ino` | Main program. `setup()` starts the screen and touch and shows page 1; `loop()` watches for taps and turns pages. Also accepts `n` / `p` over the serial monitor. |
+| `reader.ino` | Main program. Starts the screen and touch, then passes taps (and `n` / `p` typed in the serial monitor) to `app.cpp`. |
+| `app.h` / `app.cpp` | The reader logic: which page is showing, what a tap does, when to use a full refresh. No hardware code, so the simulator runs it too. |
 | `board_config.h` | Pin numbers and screen settings (rotation, mirroring, tap direction). The file to edit for a different board. |
 | `epd.h` / `epd.cpp` | Screen driver, based on Good Display's demo code. `epdShowFull()` flashes and clears ghosting (~3.7 s); `epdShowPartial()` updates without flashing (~0.8 s). |
 | `layout.h` / `layout.cpp` | Typesetting: word wrap, justification, paragraph indents, italics, chapter headings and the % footer. Draws into a picture in memory. |
@@ -32,13 +33,29 @@ go back.
 6. Optional: **Tools → Serial Monitor** at **115200** baud shows taps and
    refresh times.
 
+## Simulator (no hardware needed)
+
+`../simulator` runs the same reader code on a Mac in a window, so you can
+work on it without the display plugged in. Click to tap; arrow keys or
+`n` / `p` turn pages.
+
+```
+cd ~/kindlev2/simulator
+make run
+```
+
+See `simulator/README.md` for setup (SDL2 via Homebrew) and details.
+
+Only `app.cpp`, `layout.cpp` and the files they include run in the
+simulator. Changes to `epd.cpp` or `touch.cpp` still need the real hardware.
+
 ## Settings
 
 | Setting | Where |
 |---|---|
 | Pins, rotation, mirroring, tap direction | `board_config.h` |
-| Full (flashing) refresh every N page turns (0 = never) | `FULL_REFRESH_EVERY` in `reader.ino` |
-| Font and size | the `Fonts/...` includes and `fonts` in `reader.ino` |
+| Full (flashing) refresh every N page turns (0 = never) | `FULL_REFRESH_EVERY` in `app.cpp` |
+| Font and size | the `Fonts/...` includes and `fonts` in `app.cpp` |
 | Margins | top of `layout.cpp` |
 
 ## Hardware notes
