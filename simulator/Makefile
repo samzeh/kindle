@@ -13,11 +13,11 @@ LDLIBS := $(shell sdl2-config --libs)
 # except the hardware drivers: main.cpp stands in for those. A new reader file
 # that talks to hardware (e.g. an SD card driver) belongs on this list too,
 # with a stand-in added to main.cpp.
-HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp
+HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp
 READER_SOURCES := $(filter-out $(HARDWARE_ONLY),$(wildcard $(READER)/*.cpp))
 
 SOURCES := main.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp
-HEADERS := $(wildcard shim/*.h) $(wildcard $(READER)/*.h)
+HEADERS := $(wildcard shim/*.h) $(wildcard $(READER)/*.h) $(wildcard $(READER)/*/*.h)
 
 reader-sim: $(SOURCES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@ $(LDLIBS)
@@ -25,7 +25,17 @@ reader-sim: $(SOURCES) $(HEADERS)
 run: reader-sim
 	./reader-sim
 
-clean:
-	rm -f reader-sim
+# Host tests for the pure layout and hit-testing arithmetic. No SDL, no
+# main.cpp, so tests.cpp stands in for the screen driver and Serial.
+TESTFLAGS := -std=c++17 -O1 -DARDUINO=100 -Ishim -I$(READER) -I$(GFX)
 
-.PHONY: run clean
+reader-tests: tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp $(HEADERS)
+	$(CXX) $(TESTFLAGS) tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp -o $@
+
+test: reader-tests
+	./reader-tests
+
+clean:
+	rm -f reader-sim reader-tests
+
+.PHONY: run test clean

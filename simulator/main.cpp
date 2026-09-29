@@ -1,12 +1,24 @@
-// Desktop simulator for the e-reader. Runs the same reader code as the ESP32
-// (reader/app.cpp and reader/layout.cpp) and shows the screen in a window.
+// Desktop simulator for the e-reader. Builds every .cpp in reader/ except
+// the hardware drivers (epd.cpp, touch.cpp, store.cpp), which this file
+// stands in for -- so it runs the same reader code as the ESP32, screens
+// and all, and shows it in a window.
 //
-//   click          tap (left third = previous page, rest = next page)
-//   right / left   next / previous page (also n / p)
+//   click          tap: in a book, left third = previous page, middle =
+//                  controls, right third = next page. In the library, a
+//                  cover or row opens that book.
+//   right / left   next / previous page (also n / p; pages the library too)
+//   v              toggle the library view (grid / list) -- library only
+//   l              back to the library -- inside a book only
+//   o              open book 0 (taps its cover or row) -- library only
 //   Esc / q        quit
 //
+// The three screen-specific keys do nothing, and say so, when pressed on the
+// other screen: each is a tap at fixed coordinates, and those coordinates mean
+// something else over there. See simKey.
+//
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
-// p = previous), saves the screen to page.bmp and exits.
+// p = previous, v = toggle the library view, l = back to the library, o =
+// open book 0), saves the screen to page.bmp and exits.
 #include <SDL.h>
 #include <vector>
 
@@ -14,6 +26,8 @@
 #include "app.h"
 #include "board_config.h"
 #include "epd.h"
+#include "screens.h"
+#include "store.h"
 
 SerialPort Serial;
 
@@ -85,7 +99,104 @@ void epdShowPartial(const uint8_t *image) {
 
 void epdSleep() {}
 
+// ---- Stand-in for NVS (reader/store.h), backed by a file ----
+
+static const char *STATE_FILE = "reader-sim.state";
+static const int MAX_BOOKS = 32;
+
+struct SimState {
+  uint32_t progress[MAX_BOOKS];
+  bool saved[MAX_BOOKS];
+  uint8_t view;
+};
+
+static SimState simState = {};
+
+static void simStateWrite() {
+  FILE *f = fopen(STATE_FILE, "wb");
+  if (!f) return;
+  fwrite(&simState, sizeof(simState), 1, f);
+  fclose(f);
+}
+
+void storeBegin() {
+  FILE *f = fopen(STATE_FILE, "rb");
+  if (!f) return;
+  if (fread(&simState, sizeof(simState), 1, f) != 1) simState = SimState{};
+  fclose(f);
+}
+
+void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
+  if (book >= MAX_BOOKS) return;
+  simState.progress[book] = storePack(offset, italic);
+  simState.saved[book] = true;
+  simStateWrite();
+}
+
+bool storeLoadProgress(uint8_t book, uint32_t &offset, bool &italic) {
+  if (book >= MAX_BOOKS || !simState.saved[book]) return false;
+  storeUnpack(simState.progress[book], offset, italic);
+  return true;
+}
+
+void storeSaveView(uint8_t view) {
+  simState.view = view;
+  simStateWrite();
+}
+
+uint8_t storeLoadView() {
+  return simState.view;
+}
+
 // ---- Window and input ----
+
+// Turns one input character into the app action it stands for: shared by the
+// interactive key handler and the --screenshot sequence parser, so a key
+// added to one is never missing from the other. Unrecognised characters
+// (and 'n') turn the page forward; 'p' turns it back.
+//
+// Each key stands for a tap at fixed coordinates, and the same coordinates
+// mean different things on different screens: (400, 20) toggles the library
+// view but turns the page inside a book, and a list row is hit anywhere across
+// its width where a grid cell is not. So a key that only makes sense on one
+// screen is ignored on the other rather than firing a tap that quietly does
+// something else -- with no board to hand, the simulator is the only evidence
+// a change to the reader has, and a screenshot whose caption is wrong is worse
+// than no screenshot.
+static void simKey(char key) {
+  const Screen screen = appCurrentScreen();
+  switch (key) {
+    case 'v':  // library only: inside a book, (400, 20) turns the page
+      if (screen != SCREEN_LIBRARY) {
+        printf("'v' ignored: it toggles the library view, and a book is open.\n");
+        break;
+      }
+      appTap(400, 20);
+      break;
+    case 'l':  // reading only: in the library's list view, (240, 400) opens a book
+      if (screen != SCREEN_READING) {
+        printf("'l' ignored: it leaves a book, and the library is already up.\n");
+        break;
+      }
+      appTap(240, 400);  // middle third: raise the control bar
+      appTap(40, 30);    // its back arrow
+      break;
+    // A fixed point that hits book 0 in either library view, so 'o' means the
+    // same thing whichever is up: x=126 is inside the grid's left column
+    // (x 24-227) and anywhere along a list row; y=80 is inside the grid's top
+    // row (y 54-403) and inside list row 0 (y 50-167), and below the 48px
+    // header in both. A convenience for headless verification of a fixed
+    // point, not a general "book picker".
+    case 'o':
+      if (screen != SCREEN_LIBRARY) {
+        printf("'o' ignored: it opens a book from the library, and one is already open.\n");
+        break;
+      }
+      appTap(126, 80);
+      break;
+    default: appTurnPage(key == 'p' ? -1 : 1); break;  // both screens page
+  }
+}
 
 int main(int argc, char **argv) {
   const char *screenshotFile = nullptr;
@@ -121,7 +232,7 @@ int main(int argc, char **argv) {
   appBegin();
 
   if (screenshotFile) {
-    for (const char *c = screenshotTurns; *c; c++) appTurnPage(*c == 'p' ? -1 : 1);
+    for (const char *c = screenshotTurns; *c; c++) simKey(*c);
     SDL_Surface *shot = SDL_CreateRGBSurfaceWithFormatFrom(
       pixels.data(), SCREEN_W, SCREEN_H, 32, SCREEN_W * sizeof(uint32_t), SDL_PIXELFORMAT_ARGB8888);
     SDL_SaveBMP(shot, screenshotFile);
@@ -130,7 +241,9 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, q to quit.\n");
+  printf("Click to tap (left third = back), arrow keys or n/p to turn pages, "
+         "v to toggle library view, l to return to the library, o to open "
+         "book 0, q to quit.\n");
 
   SDL_Event event;
   while (SDL_WaitEvent(&event)) {
@@ -145,8 +258,11 @@ int main(int argc, char **argv) {
     }
     if (event.type == SDL_KEYDOWN) {
       switch (event.key.keysym.sym) {
-        case SDLK_RIGHT: case SDLK_n: case SDLK_SPACE: appTurnPage(1); break;
-        case SDLK_LEFT: case SDLK_p: appTurnPage(-1); break;
+        case SDLK_RIGHT: case SDLK_n: case SDLK_SPACE: simKey('n'); break;
+        case SDLK_LEFT: case SDLK_p: simKey('p'); break;
+        case SDLK_v: simKey('v'); break;
+        case SDLK_l: simKey('l'); break;
+        case SDLK_o: simKey('o'); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }
