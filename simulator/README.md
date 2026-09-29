@@ -29,10 +29,15 @@ make run
 | Click | Tap: in a book, left third = previous page, middle = controls, right third = next page. In the library, a cover or row opens that book. |
 | Right arrow, `n`, space | Next page (or next library page) |
 | Left arrow, `p` | Previous page (or previous library page) |
-| `v` | Toggle the library view (grid / list) |
-| `l` | Back to the library (opens the control bar, then taps its back arrow) |
-| `o` | Open book 0 (taps the grid's top-left cover) -- a fixed-point convenience for headless verification, not a general book picker |
+| `v` | **Library only.** Toggle the library view (grid / list) |
+| `l` | **Inside a book only.** Back to the library (opens the control bar, then taps its back arrow) |
+| `o` | **Library only.** Open book 0 (taps its cover in grid view, its row in list view) -- a fixed-point convenience for headless verification, not a general book picker |
 | `q` or Esc | Quit |
+
+Each key is a tap at fixed coordinates, and the same coordinates mean something
+else on the other screen: `(400, 20)` toggles the view in the library but turns
+the page inside a book. So `v`, `l` and `o` do nothing at all -- and print why
+-- when pressed on the screen they do not belong to. `n` and `p` work on both.
 
 `make run` rebuilds automatically when the reader code has changed. What the
 device would print to the serial monitor appears in the Terminal.

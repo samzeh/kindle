@@ -205,6 +205,13 @@ static void testLibraryGridHitTest() {
   CHECK_EQ(libraryHitTest(383, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);   // toggle edge
   CHECK_EQ(libraryHitTest(384, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
 
+  // (126, 80) is the point the simulator's 'o' key taps. It has to open book 0
+  // in *both* views, since the key has no way to know which one is up; the
+  // list-view half of this pair is asserted in testLibraryListHitTest.
+  LibraryHit simO = libraryHitTest(126, 80, 0, LIB_VIEW_GRID);
+  CHECK_EQ(simO.action, LIB_OPEN_BOOK);
+  CHECK_EQ(simO.book, 0);
+
   // Footer paging.
   CHECK_EQ(libraryHitTest(50, 780, 0, LIB_VIEW_GRID).action, LIB_PREV_PAGE);
   CHECK_EQ(libraryHitTest(400, 780, 0, LIB_VIEW_GRID).action, LIB_NEXT_PAGE);
@@ -227,6 +234,12 @@ static void testLibraryListHitTest() {
 
   // Rows past the end of the shelf open nothing.
   CHECK_EQ(libraryHitTest(240, 560, 0, LIB_VIEW_LIST).action, LIB_NONE);
+
+  // The other half of the simulator 'o' key's shared point: the same (126, 80)
+  // that hits the grid's top-left cover also hits list row 0.
+  LibraryHit simO = libraryHitTest(126, 80, 0, LIB_VIEW_LIST);
+  CHECK_EQ(simO.action, LIB_OPEN_BOOK);
+  CHECK_EQ(simO.book, 0);
 
   // The header and footer behave the same in both views.
   CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_LIST).action, LIB_TOGGLE_VIEW);

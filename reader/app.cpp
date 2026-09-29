@@ -17,6 +17,10 @@ GFXcanvas1 &appCanvas() {
   return canvas;
 }
 
+Screen appCurrentScreen() {
+  return current;
+}
+
 static void showCurrent(bool fullRefresh) {
   switch (current) {
     case SCREEN_LIBRARY: libraryShow(fullRefresh); break;

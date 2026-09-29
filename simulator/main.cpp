@@ -7,10 +7,14 @@
 //                  controls, right third = next page. In the library, a
 //                  cover or row opens that book.
 //   right / left   next / previous page (also n / p; pages the library too)
-//   v              toggle the library view (grid / list)
-//   l              back to the library, from inside a book
-//   o              open book 0 (taps the grid's top-left cover), from the library
+//   v              toggle the library view (grid / list) -- library only
+//   l              back to the library -- inside a book only
+//   o              open book 0 (taps its cover or row) -- library only
 //   Esc / q        quit
+//
+// The three screen-specific keys do nothing, and say so, when pressed on the
+// other screen: each is a tap at fixed coordinates, and those coordinates mean
+// something else over there. See simKey.
 //
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
 // p = previous, v = toggle the library view, l = back to the library, o =
@@ -22,6 +26,7 @@
 #include "app.h"
 #include "board_config.h"
 #include "epd.h"
+#include "screens.h"
 #include "store.h"
 
 SerialPort Serial;
@@ -149,16 +154,47 @@ uint8_t storeLoadView() {
 // interactive key handler and the --screenshot sequence parser, so a key
 // added to one is never missing from the other. Unrecognised characters
 // (and 'n') turn the page forward; 'p' turns it back.
+//
+// Each key stands for a tap at fixed coordinates, and the same coordinates
+// mean different things on different screens: (400, 20) toggles the library
+// view but turns the page inside a book, and a list row is hit anywhere across
+// its width where a grid cell is not. So a key that only makes sense on one
+// screen is ignored on the other rather than firing a tap that quietly does
+// something else -- with no board to hand, the simulator is the only evidence
+// a change to the reader has, and a screenshot whose caption is wrong is worse
+// than no screenshot.
 static void simKey(char key) {
+  const Screen screen = appCurrentScreen();
   switch (key) {
-    case 'v': appTap(400, 20); break;                          // toggle library view
-    case 'l': appTap(240, 400); appTap(40, 30); break;          // controls, then back
-    // Taps the centre of the grid's top-left cell (column 0 starts at
-    // x=24, row 0 at y=54, each cell 204 x 350), which always hits book 0.
-    // A convenience for headless verification of a fixed point, not a
-    // general "book picker".
-    case 'o': appTap(126, 200); break;
-    default: appTurnPage(key == 'p' ? -1 : 1); break;
+    case 'v':  // library only: inside a book, (400, 20) turns the page
+      if (screen != SCREEN_LIBRARY) {
+        printf("'v' ignored: it toggles the library view, and a book is open.\n");
+        break;
+      }
+      appTap(400, 20);
+      break;
+    case 'l':  // reading only: in the library's list view, (240, 400) opens a book
+      if (screen != SCREEN_READING) {
+        printf("'l' ignored: it leaves a book, and the library is already up.\n");
+        break;
+      }
+      appTap(240, 400);  // middle third: raise the control bar
+      appTap(40, 30);    // its back arrow
+      break;
+    // A fixed point that hits book 0 in either library view, so 'o' means the
+    // same thing whichever is up: x=126 is inside the grid's left column
+    // (x 24-227) and anywhere along a list row; y=80 is inside the grid's top
+    // row (y 54-403) and inside list row 0 (y 50-167), and below the 48px
+    // header in both. A convenience for headless verification of a fixed
+    // point, not a general "book picker".
+    case 'o':
+      if (screen != SCREEN_LIBRARY) {
+        printf("'o' ignored: it opens a book from the library, and one is already open.\n");
+        break;
+      }
+      appTap(126, 80);
+      break;
+    default: appTurnPage(key == 'p' ? -1 : 1); break;  // both screens page
   }
 }
 

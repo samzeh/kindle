@@ -16,5 +16,11 @@ enum Screen : uint8_t {
 // a whole-image change needs on e-paper.
 void appGoTo(Screen s);
 
+// Which screen is showing. The reader itself never needs to ask -- appTap and
+// appTurnPage already route by it -- but the simulator does, so a debug key
+// cannot fire a tap at coordinates that mean something else on whichever
+// screen happens to be up.
+Screen appCurrentScreen();
+
 // The one 48 KB buffer every screen draws into. Never allocate another.
 GFXcanvas1 &appCanvas();
