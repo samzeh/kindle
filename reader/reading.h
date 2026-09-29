@@ -7,10 +7,14 @@ enum ReadingAction : uint8_t {
   READ_NONE,
   READ_PREV,
   READ_NEXT,
+  READ_SHOW_CONTROLS,
+  READ_HIDE_CONTROLS,
+  READ_BACK_TO_LIBRARY,
 };
 
-// Which action a tap at screen x maps to. Pure, so it is tested on the host.
-ReadingAction readingHitTest(int16_t x);
+// What a tap means, given whether the control bar is up. Pure, so it is
+// tested on the host.
+ReadingAction readingHitTest(int16_t x, int16_t y, bool controlsVisible);
 
 // Switches to book `index`, at the start (or its saved position once
 // persistence exists).

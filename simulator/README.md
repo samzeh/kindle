@@ -28,6 +28,8 @@ make run
 | Click | Tap: left third = previous page, rest = next page |
 | Right arrow, `n`, space | Next page |
 | Left arrow, `p` | Previous page |
+| `v` | Toggle the library view (grid / list) |
+| `l` | Back to the library (opens the control bar, then taps its back arrow) |
 | `q` or Esc | Quit |
 
 `make run` rebuilds automatically when the reader code has changed. What the

@@ -4,11 +4,12 @@
 //   click          tap (left third = previous page, rest = next page)
 //   right / left   next / previous page (also n / p)
 //   v              toggle the library view (grid / list)
+//   l              back to the library, from inside a book
 //   Esc / q        quit
 //
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
-// p = previous, v = toggle the library view), saves the screen to page.bmp
-// and exits.
+// p = previous, v = toggle the library view, l = back to the library), saves
+// the screen to page.bmp and exits.
 #include <SDL.h>
 #include <vector>
 
@@ -125,6 +126,7 @@ int main(int argc, char **argv) {
   if (screenshotFile) {
     for (const char *c = screenshotTurns; *c; c++) {
       if (*c == 'v') appTap(400, 20);
+      else if (*c == 'l') { appTap(240, 400); appTap(40, 30); }  // controls, then back
       else appTurnPage(*c == 'p' ? -1 : 1);
     }
     SDL_Surface *shot = SDL_CreateRGBSurfaceWithFormatFrom(

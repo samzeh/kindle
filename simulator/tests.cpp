@@ -40,10 +40,25 @@ static int failures = 0;
   } while (0)
 
 static void testReadingHitTest() {
-  CHECK_EQ(readingHitTest(0), READ_PREV);
-  CHECK_EQ(readingHitTest(159), READ_PREV);
-  CHECK_EQ(readingHitTest(160), READ_NEXT);
-  CHECK_EQ(readingHitTest(479), READ_NEXT);
+  // Controls hidden: left third back, centre third opens the bar, right third
+  // forward.
+  CHECK_EQ(readingHitTest(0, 400, false), READ_PREV);
+  CHECK_EQ(readingHitTest(159, 400, false), READ_PREV);
+  CHECK_EQ(readingHitTest(160, 400, false), READ_SHOW_CONTROLS);
+  CHECK_EQ(readingHitTest(319, 400, false), READ_SHOW_CONTROLS);
+  CHECK_EQ(readingHitTest(320, 400, false), READ_NEXT);
+  CHECK_EQ(readingHitTest(479, 400, false), READ_NEXT);
+
+  // Controls visible: the back arrow returns to the library, the rest of the
+  // bar and the page below it dismiss the bar. No page turns while it is up.
+  CHECK_EQ(readingHitTest(10, 30, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(79, 30, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(80, 30, true), READ_HIDE_CONTROLS);
+  CHECK_EQ(readingHitTest(240, 400, true), READ_HIDE_CONTROLS);
+  CHECK_EQ(readingHitTest(10, 400, true), READ_HIDE_CONTROLS);
+
+  // The back arrow only counts inside the bar, not down the left edge.
+  CHECK_EQ(readingHitTest(10, 65, true), READ_HIDE_CONTROLS);
 }
 
 static void testBookTable() {
@@ -311,6 +326,57 @@ static void testReadingProgressPercent() {
   CHECK_EQ(readingProgressPercent(1), 0);
 }
 
+// A page turn that arrives while the control bar is up must leave the bar's
+// visibility untouched if the turn is rejected at a boundary (last/first
+// page) -- otherwise the screen would keep showing the bar while the model
+// says it is hidden, until something else forces a redraw. An accepted turn,
+// by contrast, must still clear it, since the page underneath really did
+// change. `controlsVisible` is a file-static in reading.cpp with no getter,
+// so this drives it through readingTap's behaviour, which reads it
+// internally: a tap in the left third moves a page only while the bar is
+// down, and only hides the bar while it is up. The two cases are told apart
+// by watching readingProgressPercent move (or not) after such a tap. Placed
+// with the other state-mutating reading tests, before the list view test
+// takes over the shared canvas.
+static void testControlsVisibleSurvivesRejectedTurn() {
+  readingOpenBook(0);
+  readingShow(true);
+
+  // Run to the end of the book, so the next forward turn is rejected.
+  uint32_t pct = readingProgressPercent(0);
+  int guard = 0;
+  while (guard < 200) {
+    readingTurnPage(1);
+    uint32_t next = readingProgressPercent(0);
+    if (next == pct) break;  // stopped moving: this is the last page
+    pct = next;
+    guard++;
+  }
+  CHECK(guard < 200);  // sanity: the book paginated and we found the end
+
+  readingTap(240, 400);            // show the bar
+  uint32_t lastPct = readingProgressPercent(0);
+  readingTurnPage(1);              // rejected: already at the last page
+  CHECK_EQ(readingProgressPercent(0), lastPct);  // confirms the rejection
+
+  // If the rejected turn had wrongly cleared controlsVisible, this tap would
+  // be read as READ_PREV and the page would move backward.
+  readingTap(10, 400);
+  CHECK_EQ(readingProgressPercent(0), lastPct);  // unchanged: the tap only hid the bar
+
+  // Accepted case: bring the bar back up, then turn backward -- accepted,
+  // since we are not at the first page.
+  readingTap(240, 400);
+  readingTurnPage(-1);
+  uint32_t afterTurn = readingProgressPercent(0);
+  CHECK(afterTurn < lastPct);       // confirms the turn actually moved
+
+  // The bar must already be down now, so the same tap moves a page instead
+  // of merely hiding it.
+  readingTap(10, 400);
+  CHECK(readingProgressPercent(0) < afterTurn);
+}
+
 // The list row's percentage must be right-aligned by measuring its actual
 // width, not a fixed cursor offset -- a fixed offset is only ever correct
 // for one string length, and "0%" (2 chars) and a two-digit percentage
@@ -387,6 +453,7 @@ int main() {
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
   testReadingProgressPercent();
+  testControlsVisibleSurvivesRejectedTurn();
   testListRowPercentRightAligned();
   testLibraryGridNoDuplicateCaption();
   if (failures) {
