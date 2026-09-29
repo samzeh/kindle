@@ -1,4 +1,5 @@
-// The reader itself: which page is showing and what taps do.
+// The screen router: owns the single frame buffer, normalises raw touch
+// coordinates once, and dispatches taps to whichever screen is showing.
 //
 // It has no hardware code: it draws through epd.h and is handed taps, so the
 // same code runs on the ESP32 (reader.ino) and in the desktop simulator

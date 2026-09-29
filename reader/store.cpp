@@ -14,8 +14,10 @@ static void progressKey(uint8_t book, char *out, size_t n) {
 void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
   char key[8];
   progressKey(book, key, sizeof(key));
-  // NVS skips a write whose value is unchanged, so repeated saves at the same
-  // position cost nothing.
+  // NVS is expected to skip a write whose value is unchanged, so repeated
+  // saves at the same position should cost nothing -- but this is unverified
+  // here: store.cpp is hardware-only, and there is no ESP32 board on this
+  // machine to test it against.
   prefs.putUInt(key, storePack(offset, italic));
 }
 

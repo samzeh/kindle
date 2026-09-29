@@ -157,10 +157,15 @@ entry — 126 saves per erase. Against a ~100,000 erase budget that is ~12.6 M
 saves on a single page, before the wear levelling across the partition's six
 pages is counted at all. At a heavy 1,000 page turns per day, that is decades.
 
-Two further things make it cheaper than it looks: NVS skips a write whose
-value is unchanged, so the leaving-the-screen save costs nothing when the
-position already matches, and a ~10–20 ms commit disappears entirely inside
-the ~800 ms partial refresh a page turn already costs.
+Two further things would make it cheaper still, if they hold: NVS is expected
+to skip a write whose value is unchanged, so the leaving-the-screen save would
+cost nothing when the position already matches, and a ~10–20 ms commit should
+disappear entirely inside the ~800 ms partial refresh a page turn already
+costs. Neither claim is verified here -- `store.cpp` is hardware-only and no
+ESP32 board was available to test it against -- and neither needs to be: the
+erase-budget arithmetic above rests only on one entry per save via the
+`uint32` packing, which `testStorePacking` does verify, independent of
+whether unchanged writes actually turn out to be free.
 
 **Packing.** `storeSaveProgress` stores offset and italic as one `uint32`:
 offset in bits 0–30, italic in bit 31. Text lengths are nowhere near 2^31, and
