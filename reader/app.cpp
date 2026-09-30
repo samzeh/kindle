@@ -30,13 +30,16 @@ static void showCurrent(bool fullRefresh) {
 
 void appGoTo(Screen s) {
   current = s;
-  showCurrent(true);
+  showCurrent(false);
 }
 
 void appBegin() {
   storeBegin();
   canvas.setRotation(SCREEN_ROTATION);
-  appGoTo(SCREEN_LIBRARY);
+  // The one full refresh: after power-up the panel needs it to know what is
+  // on screen before any no-flash refresh can compare against it.
+  current = SCREEN_LIBRARY;
+  showCurrent(true);
 }
 
 void appTurnPage(int delta) {

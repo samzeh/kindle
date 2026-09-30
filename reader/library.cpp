@@ -208,7 +208,7 @@ void libraryTurnPage(int delta) {
   if (delta > 0 && page + 1 >= pages) return;
   if (delta < 0 && page == 0) return;
   page = (uint8_t)(page + delta);
-  libraryShow(true);
+  libraryShow(false);
 }
 
 void libraryTap(int16_t x, int16_t y) {
@@ -225,7 +225,7 @@ void libraryTap(int16_t x, int16_t y) {
       view = view == LIB_VIEW_GRID ? LIB_VIEW_LIST : LIB_VIEW_GRID;
       storeSaveView(view);
       page = 0;
-      libraryShow(true);
+      libraryShow(false);
       break;
     default: break;
   }

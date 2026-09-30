@@ -12,8 +12,9 @@ enum Screen : uint8_t {
   SCREEN_READING,
 };
 
-// Switches screen and draws it with a full (flashing) refresh, which is what
-// a whole-image change needs on e-paper.
+// Switches screen and draws it with the no-flash refresh. It redraws every
+// changed pixel, so a whole new screen is fine, at the cost of a little more
+// ghosting than a full (flashing) refresh would leave.
 void appGoTo(Screen s);
 
 // Which screen is showing. The reader itself never needs to ask -- appTap and

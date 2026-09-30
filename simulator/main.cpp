@@ -88,6 +88,7 @@ static void showImage(const uint8_t *image) {
 void epdBegin() {}
 
 void epdShowFull(const uint8_t *image) {
+  printf("screen: full refresh (the device flashes here)\n");
   showSolid(INK, FLASH_MS);
   showSolid(PAPER, FLASH_MS);
   showImage(image);
