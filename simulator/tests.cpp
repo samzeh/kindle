@@ -1,17 +1,25 @@
-// Host tests for the reader's pure arithmetic: hit-testing, pagination and
-// cover scaling. Run with `make test`.
+// Host tests for the reader: hit-testing, pagination, covers, the library
+// and the reading screen, using the small EPUBs in fixtures/library. Run
+// with `make test` (from simulator/). EPUB parsing itself is tested in
+// test_epub.cpp.
 #include <cstdio>
 #include "Arduino.h"
-#include "books.h"
+#include "check.h"
+#include "catalog.h"
 #include "cover.h"
+#include "host_platform.h"
+#include "layout.h"
 #include "epd.h"
 #include "library.h"
 #include "reading.h"
 #include "screens.h"
+#include "storage.h"
 #include "store.h"
 #include <Fonts/FreeSerifBold9pt7b.h>
 
 SerialPort Serial;
+
+void runEpubTests();  // test_epub.cpp
 
 // ---- Stand-ins for the screen driver (reader/epd.h) ----
 void epdBegin() {}
@@ -19,49 +27,11 @@ void epdShowFull(const uint8_t *) {}
 void epdShowPartial(const uint8_t *) {}
 void epdSleep() {}
 
-// ---- Stand-ins for persistence (reader/store.h) ----
-// store.cpp is hardware-only (real NVS via Preferences), so it is not linked
-// into this target, but reading.cpp and library.cpp call into it regardless.
-// Nothing touches a state file on disk -- that would make these tests order-
-// and history-dependent. Most tests want "nothing has ever been saved", which
-// is the default; testResumeRebuildsPageHistory sets a saved offset through
-// `fakeSaved*` and clears it again afterwards.
-static bool fakeSavedValid = false;
-static uint32_t fakeSavedOffset = 0;
-static bool fakeSavedItalic = false;
+// Saved positions (reader/store.h) come from host_platform.cpp, in memory
+// only. Tests that need a book nobody has read call hostStoreReset() first.
 
-void storeBegin() {}
-void storeSaveProgress(uint8_t, uint32_t, bool) {}
-bool storeLoadProgress(uint8_t, uint32_t &offset, bool &italic) {
-  if (!fakeSavedValid) return false;
-  offset = fakeSavedOffset;
-  italic = fakeSavedItalic;
-  return true;
-}
-void storeSaveView(uint8_t) {}
-uint8_t storeLoadView() { return 0; }
-
-// ---- Tiny test framework ----
-static int failures = 0;
-
-#define CHECK(cond)                                                       \
-  do {                                                                    \
-    if (!(cond)) {                                                        \
-      printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);              \
-      failures++;                                                         \
-    }                                                                     \
-  } while (0)
-
-#define CHECK_EQ(actual, expected)                                        \
-  do {                                                                    \
-    long a_ = (long)(actual), e_ = (long)(expected);                      \
-    if (a_ != e_) {                                                       \
-      printf("FAIL %s:%d  %s: got %ld, want %ld\n", __FILE__, __LINE__,   \
-             #actual, a_, e_);                                            \
-      failures++;                                                         \
-    }                                                                     \
-  } while (0)
-
+// ---- Tiny test framework: see check.h ----
+int failures = 0;
 static void testReadingHitTest() {
   // Controls hidden: left third back, centre third opens the bar, right third
   // forward.
@@ -90,19 +60,26 @@ static void testReadingHitTest() {
   CHECK_EQ(readingHitTest(10, 65, true), READ_HIDE_CONTROLS);
 }
 
-static void testBookTable() {
-  CHECK_EQ(BOOK_COUNT, 4);
-  for (uint8_t i = 0; i < BOOK_COUNT; i++) {
-    CHECK(BOOKS[i].title != nullptr && BOOKS[i].title[0] != '\0');
-    CHECK(BOOKS[i].author != nullptr && BOOKS[i].author[0] != '\0');
-    CHECK(BOOKS[i].text != nullptr);
-    // Long enough to paginate to more than one page.
-    CHECK(strlen(BOOKS[i].text) > 1200);
+// The fixture library holds four books plus two files that are not books
+// (a macOS "._" file and notes.txt), which must be skipped. Books come out
+// sorted by title, with metadata and covers from their EPUBs; a second scan
+// finds them all in the cache and imports nothing.
+static void testCatalogScan() {
+  CHECK_EQ(catalogCount(), 4);
+  const char *titles[] = { "Aardvark Stories", "Bramble Tales", "Coverless Notes", "Deep Folder" };
+  const bool covers[] = { true, true, false, false };
+  for (uint16_t i = 0; i < 4 && i < catalogCount(); i++) {
+    CHECK_STR(catalogBook(i).title, titles[i]);
+    CHECK(catalogBook(i).author[0] != '\0');
+    CHECK(catalogBook(i).hasCover == covers[i]);
+    CHECK_EQ(catalogBook(i).textLength, 0);  // not opened yet
   }
-  // Titles are distinct, so the library never shows two identical cells.
-  for (uint8_t i = 0; i < BOOK_COUNT; i++)
-    for (uint8_t j = i + 1; j < BOOK_COUNT; j++)
-      CHECK(strcmp(BOOKS[i].title, BOOKS[j].title) != 0);
+  CHECK_STR(catalogBook(0).author, "Ann Author");
+  // Ids differ, so each book gets its own cache folder and saved position.
+  for (uint16_t i = 0; i < catalogCount(); i++)
+    for (uint16_t j = i + 1; j < catalogCount(); j++) CHECK(catalogBook(i).id != catalogBook(j).id);
+  CHECK_EQ(catalogScan(nullptr, nullptr), 0);  // everything already cached
+  CHECK_EQ(catalogCount(), 4);
 }
 
 static void testCoverScaling() {
@@ -121,15 +98,6 @@ static void testCoverScaling() {
     CHECK(coverSrcIndex(size - 1, size, COVER_W) < COVER_W);
     CHECK(coverSrcIndex(0, size, COVER_W) >= 0);
   }
-
-  // Bit order is MSB first: bit 0 of the first byte is the leftmost pixel.
-  static uint8_t row[COVER_ROW_BYTES * 2] = { 0 };
-  row[0] = 0x80;                     // (0,0) is ink
-  row[COVER_ROW_BYTES] = 0x01;       // (7,1) is ink
-  CHECK(coverBit(row, 0, 0));
-  CHECK(!coverBit(row, 1, 0));
-  CHECK(coverBit(row, 7, 1));
-  CHECK(!coverBit(row, 6, 1));
 }
 
 // truncateToWidth backs both drawCentredText (grid captions, footer labels)
@@ -161,7 +129,7 @@ static void testTruncateToWidth() {
 
 static void testLibraryGridHitTest() {
   // Four books per page in grid view.
-  CHECK_EQ(libraryPageCount(LIB_VIEW_GRID), 1);  // BOOK_COUNT == 4
+  CHECK_EQ(libraryPageCount(LIB_VIEW_GRID), 1);  // catalogCount() == 4
 
   // Header, right side: toggles the view.
   CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
@@ -254,50 +222,71 @@ static void testLibraryListHitTest() {
   CHECK_EQ(libraryHitTest(240, 168, 0, LIB_VIEW_LIST).book, 1);
 
   // The last valid row (row 3, book index 3, y 404-521) vs the first row
-  // past the shelf (row 4 would be index 4, but BOOK_COUNT == 4).
+  // past the shelf (row 4 would be index 4, but catalogCount() == 4).
   CHECK_EQ(libraryHitTest(240, 521, 0, LIB_VIEW_LIST).book, 3);
   CHECK_EQ(libraryHitTest(240, 522, 0, LIB_VIEW_LIST).action, LIB_NONE);
 }
 
+// A 48 x 72 grayscale JPEG, black top half and white bottom half, made with
+// Pillow (quality 95). Same 2:3 shape as the cover box, so nothing is cropped.
+static const uint8_t HALF_BLACK_JPEG[] = {
+  0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
+  0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x02, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02,
+  0x01, 0x01, 0x01, 0x02, 0x02, 0x02, 0x02, 0x02, 0x04, 0x03, 0x02, 0x02, 0x02, 0x02, 0x05, 0x04,
+  0x04, 0x03, 0x04, 0x06, 0x05, 0x06, 0x06, 0x06, 0x05, 0x06, 0x06, 0x06, 0x07, 0x09, 0x08, 0x06,
+  0x07, 0x09, 0x07, 0x06, 0x06, 0x08, 0x0B, 0x08, 0x09, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x06, 0x08,
+  0x0B, 0x0C, 0x0B, 0x0A, 0x0C, 0x09, 0x0A, 0x0A, 0x0A, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x48,
+  0x00, 0x30, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01,
+  0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+  0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0xFF, 0xC4, 0x00, 0xB5, 0x10, 0x00, 0x02, 0x01, 0x03,
+  0x03, 0x02, 0x04, 0x03, 0x05, 0x05, 0x04, 0x04, 0x00, 0x00, 0x01, 0x7D, 0x01, 0x02, 0x03, 0x00,
+  0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32,
+  0x81, 0x91, 0xA1, 0x08, 0x23, 0x42, 0xB1, 0xC1, 0x15, 0x52, 0xD1, 0xF0, 0x24, 0x33, 0x62, 0x72,
+  0x82, 0x09, 0x0A, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x34, 0x35,
+  0x36, 0x37, 0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55,
+  0x56, 0x57, 0x58, 0x59, 0x5A, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x73, 0x74, 0x75,
+  0x76, 0x77, 0x78, 0x79, 0x7A, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x92, 0x93, 0x94,
+  0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xB2,
+  0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9,
+  0xCA, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xE1, 0xE2, 0xE3, 0xE4, 0xE5, 0xE6,
+  0xE7, 0xE8, 0xE9, 0xEA, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFF, 0xDA,
+  0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0xFE, 0x7F, 0xE8, 0xA2, 0x8A, 0x28, 0xA2, 0x8A,
+  0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A, 0xFD, 0xFE, 0xFF, 0x00,
+  0x88, 0x18, 0xFF, 0x00, 0xEB, 0x28, 0xBF, 0xF9, 0x84, 0xFF, 0x00, 0xFB, 0xF5, 0x47, 0xFC, 0x40,
+  0xC7, 0xFF, 0x00, 0x59, 0x45, 0xFF, 0x00, 0xCC, 0x27, 0xFF, 0x00, 0xDF, 0xAA, 0x3F, 0xE2, 0x06,
+  0x3F, 0xFA, 0xCA, 0x2F, 0xFE, 0x61, 0x3F, 0xFE, 0xFD, 0x51, 0xFF, 0x00, 0x10, 0x31, 0xFF, 0x00,
+  0xD6, 0x51, 0x7F, 0xF3, 0x09, 0xFF, 0x00, 0xF7, 0xEA, 0x8F, 0xF8, 0x81, 0x8F, 0xFE, 0xB2, 0x8B,
+  0xFF, 0x00, 0x98, 0x4F, 0xFF, 0x00, 0xBF, 0x54, 0x7F, 0xC4, 0x0C, 0x7F, 0xF5, 0x94, 0x5F, 0xFC,
+  0xC2, 0x7F, 0xFD, 0xFA, 0xAF, 0xDF, 0xEA, 0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A,
+  0x28, 0xA2, 0x8A, 0x28, 0xA2, 0x8A, 0x28, 0xA2, 0xBF, 0xFF, 0xD9,
+};
+
+static bool bitSet(const uint8_t *bits, int16_t w, int16_t x, int16_t y) {
+  return bits[y * ((w + 7) / 8) + x / 8] & (0x80 >> (x % 8));
+}
+
 static void testDrawCoverPixels() {
-  // A synthetic cover: ink at (10,10) and across a band of rows around 200,
-  // paper elsewhere. Points are chosen well inside the 1px frame drawCover
-  // draws. The band (not a single row) matters for the thumbnail check below:
-  // nearest-neighbour downsampling from 306 to 108 rows only samples every
-  // ~2.8th source row, so a single inked row can fall in a gap between
-  // sampled rows and never appear in the thumbnail even though the bit
-  // convention is correct.
-  static uint8_t cover[COVER_ROW_BYTES * COVER_H] = { 0 };
-  cover[10 * COVER_ROW_BYTES + 10 / 8] |= 0x80 >> (10 % 8);
-  for (int16_t y = 195; y <= 205; y++) {
-    for (int16_t x = 0; x < COVER_W; x++) {
-      cover[y * COVER_ROW_BYTES + x / 8] |= 0x80 >> (x % 8);
-    }
-  }
+  // Black in the JPEG is ink (a 1 bit) at both sizes. If the black check
+  // fails with the white one passing, covers render as photographic
+  // negatives. Points avoid the black/white boundary, where dithering mixes
+  // the two.
+  static uint8_t grid[COVER_GRID_BYTES], thumb[COVER_THUMB_BYTES];
+  MemReader jpeg(HALF_BLACK_JPEG, sizeof(HALF_BLACK_JPEG));
+  CHECK(coverRender(jpeg, grid, thumb));
+  CHECK(bitSet(grid, COVER_W, 100, 60));
+  CHECK(!bitSet(grid, COVER_W, 100, 250));
+  CHECK(bitSet(thumb, THUMB_W, THUMB_W / 2, 20));
+  CHECK(!bitSet(thumb, THUMB_W, THUMB_W / 2, 90));
 
-  const Book withArt = { "T", "A", "text", cover };
-  GFXcanvas1 full(COVER_W, COVER_H);
-  full.fillScreen(0xFFFF);
-  drawCover(full, withArt, 0, 0, COVER_W, COVER_H);
+  // Bytes that are not a JPEG are refused rather than drawn as garbage.
+  static const uint8_t notJpeg[] = { 0x00, 0x01, 0x02, 0x03 };
+  MemReader bad(notJpeg, sizeof(notJpeg));
+  CHECK(!coverRender(bad, grid, thumb));
 
-  // A 1 bit in the source is INK, i.e. a BLACK pixel. If this fails with the
-  // paper check below passing, the bit convention is inverted and every cover
-  // renders as a photographic negative.
-  CHECK(!full.getPixel(10, 10));       // false == black in GFXcanvas1
-  CHECK(!full.getPixel(100, 200));     // on the ink row
-  CHECK(full.getPixel(100, 150));      // a 0 bit stays white
-
-  // Downscaled to a thumbnail, the ink band still lands as ink.
-  GFXcanvas1 thumb(THUMB_W, THUMB_H);
-  thumb.fillScreen(0xFFFF);
-  drawCover(thumb, withArt, 0, 0, THUMB_W, THUMB_H);
-  int16_t inkRow = 200 * THUMB_H / COVER_H;   // nearest-neighbour inverse
-  CHECK(!thumb.getPixel(THUMB_W / 2, inkRow));
-  CHECK(thumb.getPixel(THUMB_W / 2, 30));     // well outside the band: white
-
-  // The nullptr fallback draws a frame rather than nothing — this is the only
-  // path that renders today, since every book has cover == nullptr.
-  const Book noArt = { "Title", "Author", "text", nullptr };
+  // A book without a cover draws a frame rather than nothing.
+  BookInfo noArt = {};
+  strcpy(noArt.title, "Title");
+  strcpy(noArt.author, "Author");
   GFXcanvas1 fb(COVER_W, COVER_H);
   fb.fillScreen(0xFFFF);
   drawCover(fb, noArt, 0, 0, COVER_W, COVER_H);
@@ -310,7 +299,9 @@ static void testDrawCoverPixels() {
 // list view's 72px thumbnail), the caller draws the caption elsewhere, so
 // drawCover must draw the frame alone or the text is stated twice.
 static void testDrawCoverPlaceholderLegibility() {
-  const Book noArt = { "Title", "Author", "text", nullptr };
+  BookInfo noArt = {};
+  strcpy(noArt.title, "Title");
+  strcpy(noArt.author, "Author");
 
   GFXcanvas1 full(COVER_W, COVER_H);
   full.fillScreen(0xFFFF);
@@ -338,23 +329,22 @@ static void testDrawCoverPlaceholderLegibility() {
   CHECK(!thumb.getPixel(THUMB_W - 1, THUMB_H - 1));
 }
 
-// Task 8 rewrites readingProgressPercent to read saved positions for every
-// book from NVS, instead of only the currently-showing book having one. This
-// test asserts the behaviour that must survive that rewrite -- ranges and
-// ordering, never an exact percentage, since the exact value is a function
-// of font metrics and page layout, not a contract worth pinning. It sits
-// here, after the pure arithmetic tests, because readingOpenBook and
-// readingTurnPage draw through the shared appCanvas() singleton and mutate
-// reading.cpp's statics.
+// readingProgressPercent reads saved positions for every book, not only the
+// open one. This asserts ranges and ordering, never an exact percentage,
+// since the exact value is a function of font metrics and page layout, not a
+// contract worth pinning. It sits here, after the pure arithmetic tests,
+// because readingOpenBook and readingTurnPage draw through the shared
+// appCanvas() singleton and mutate reading.cpp's statics.
 static void testReadingProgressPercent() {
+  hostStoreReset();
   // A book that has never been read reports 0.
   CHECK_EQ(readingProgressPercent(2), 0);
 
   // An out-of-range index reports 0 rather than reading past the table.
-  CHECK_EQ(readingProgressPercent(BOOK_COUNT), 0);
+  CHECK_EQ(readingProgressPercent(catalogCount()), 0);
   CHECK_EQ(readingProgressPercent(255), 0);
 
-  readingOpenBook(0);
+  CHECK(readingOpenBook(0));
   readingShow(true);
   CHECK_EQ(readingProgressPercent(0), 0);  // start of the book
 
@@ -381,7 +371,8 @@ static void testReadingProgressPercent() {
 // with the other state-mutating reading tests, before the list view test
 // takes over the shared canvas.
 static void testControlsVisibleSurvivesRejectedTurn() {
-  readingOpenBook(0);
+  hostStoreReset();
+  CHECK(readingOpenBook(0));
   readingShow(true);
 
   // Run to the end of the book, so the next forward turn is rejected.
@@ -419,83 +410,76 @@ static void testControlsVisibleSurvivesRejectedTurn() {
   CHECK(readingProgressPercent(0) < afterTurn);
 }
 
-// Resuming a book must restore the page the reader was on together with the
-// history in front of it, not fabricate a one-entry history: currentPage == 0
-// is pagination's meaning of "the first page of this book", so a restored page
-// numbered 0 can never be turned back and is labelled page 1 in the footer.
-// There is no getter for currentPage, so this drives the observable
-// consequences instead -- readingProgressPercent, and whether a backward turn
-// actually moves the page. Placed with the other state-mutating reading tests,
-// and it clears the fake saved position again so later tests still see a shelf
-// nothing has ever been read from.
-static void testResumeRebuildsPageHistory() {
-  const uint32_t len = (uint32_t)strlen(BOOKS[0].text);
+// Opening a book resumes on the page containing its saved position, with
+// the pages before it intact: page numbers stay real and backward turns
+// work. Placed with the other state-mutating reading tests; it clears the
+// saved positions again so later tests start books at page 1.
+static void testResumeLandsOnSavedPage() {
+  hostStoreReset();
+  CHECK(readingOpenBook(0));
+  const BookInfo &book = catalogBook(0);
+  const uint32_t len = book.textLength;
+  const uint32_t pageCount = readingPageCount();
+  CHECK(len > 0);
+  CHECK(pageCount > 3);
 
   // Resume from the middle of the book.
-  fakeSavedValid = true;
-  fakeSavedItalic = false;
-  fakeSavedOffset = len / 2;
-  readingOpenBook(0);
+  storeSaveProgress(book.id, len / 2);
+  CHECK(readingOpenBook(0));
   readingShow(true);
-
-  // The restored page is the one containing the saved offset, so it begins at
-  // or before the halfway mark (percent is floor(offset * 100 / len)).
+  const uint32_t page = readingCurrentPage();
+  CHECK(page > 0);
+  CHECK(page < pageCount - 1);
   const uint32_t restored = readingProgressPercent(0);
   CHECK(restored > 0);
-  CHECK(restored <= 50);
+  CHECK(restored <= 50);  // the page starts at or before the saved offset
 
-  // The backward turn is accepted and moves the page: the whole point of
-  // rebuilding the history. Against a one-entry history this turn is refused
-  // and the percentage never budges.
-  readingTurnPage(-1);
-  const uint32_t previous = readingProgressPercent(0);
-  CHECK(previous < restored);
-
-  // Forward again returns to exactly the restored page, and the page after it
-  // begins past the saved offset -- together with `restored <= 50` that pins
-  // the saved offset inside the restored page rather than merely near it.
-  readingTurnPage(1);
-  CHECK_EQ(readingProgressPercent(0), restored);
+  // The next page starts past it, so the saved offset is on this page.
   readingTurnPage(1);
   CHECK(readingProgressPercent(0) >= 50);
+  readingTurnPage(-1);
+  CHECK_EQ(readingCurrentPage(), page);
 
-  // Turning back from there reaches the first page rather than stalling
-  // partway, and it takes several turns -- so this really was a page deep in
-  // the book, not page 1 wearing a high percentage.
+  // Backward turns reach page 1.
   int guard = 0;
-  while (readingProgressPercent(0) > 0 && guard < 500) {
+  while (readingCurrentPage() > 0 && guard < 500) {
     readingTurnPage(-1);
     guard++;
   }
-  CHECK(guard > 1);
-  CHECK(guard < 500);
+  CHECK_EQ(guard, (int)page);
   CHECK_EQ(readingProgressPercent(0), 0);
 
-  // A saved offset at or past the end of the text must terminate the walk and
-  // land on a real last page: forward refused, backward still accepted.
-  fakeSavedOffset = len + 1000;
-  readingOpenBook(0);
-  readingShow(true);
-  const uint32_t last = readingProgressPercent(0);
-  CHECK(last > 0);
-  CHECK(last <= 100);
+  // A saved offset past the end lands on the last page.
+  storeSaveProgress(book.id, len + 1000);
+  CHECK(readingOpenBook(0));
+  CHECK_EQ(readingCurrentPage(), pageCount - 1);
   readingTurnPage(1);
-  CHECK_EQ(readingProgressPercent(0), last);  // already the last page
-  readingTurnPage(-1);
-  CHECK(readingProgressPercent(0) < last);
+  CHECK_EQ(readingCurrentPage(), pageCount - 1);  // already the last page
 
-  // A saved offset of 0 behaves exactly as a book that was never opened: the
-  // first page, with the backward turn refused and nothing left corrupted.
-  fakeSavedOffset = 0;
-  readingOpenBook(0);
-  readingShow(true);
-  CHECK_EQ(readingProgressPercent(0), 0);
+  // Turning pages saves the position; reopening comes back to it.
   readingTurnPage(-1);
-  CHECK_EQ(readingProgressPercent(0), 0);
-  readingTurnPage(1);
-  CHECK(readingProgressPercent(0) > 0);
+  CHECK(readingOpenBook(0));
+  CHECK_EQ(readingCurrentPage(), pageCount - 2);
 
-  fakeSavedValid = false;
+  hostStoreReset();
+}
+
+// The control bar shows the chapter the current page is in: the fixture's
+// first chapter, its sub-section halfway through, then chapter 2.
+static void testChapterTitles() {
+  hostStoreReset();
+  CHECK(readingOpenBook(0));
+  CHECK_STR(readingChapterTitle(), "Chapter 1: The Burrow");
+  bool sawScene = false, sawChapter2 = false;
+  for (int i = 0; i < 100 && readingCurrentPage() + 1 < readingPageCount(); i++) {
+    readingTurnPage(1);
+    if (strcmp(readingChapterTitle(), "A New Scene") == 0) sawScene = true;
+    if (strcmp(readingChapterTitle(), "Chapter 2: The Ants") == 0) sawChapter2 = sawScene;
+  }
+  CHECK(sawScene);
+  CHECK(sawChapter2);  // and in that order
+  CHECK_STR(readingChapterTitle(), "Chapter 3: Home");
+  hostStoreReset();
 }
 
 // The list row's percentage must be right-aligned by measuring its actual
@@ -509,11 +493,12 @@ static void testResumeRebuildsPageHistory() {
 // state-mutating tests (drives readingOpenBook/readingTurnPage, which
 // draw through the shared appCanvas() singleton and mutate reading.cpp's
 // statics), and restores `view` to grid afterward so it does not affect
-// testLibraryGridNoDuplicateCaption, which must stay last.
+// testLibraryGridCaptionMatchesCoverArt, which must stay last.
 static void testListRowPercentRightAligned() {
+  hostStoreReset();
   libraryTap(400, 20);  // header toggle: grid -> list
 
-  readingOpenBook(0);
+  CHECK(readingOpenBook(0));
   readingShow(true);
   uint32_t pct = readingProgressPercent(0);
   int guard = 0;
@@ -522,7 +507,7 @@ static void testListRowPercentRightAligned() {
     pct = readingProgressPercent(0);
     guard++;
   }
-  CHECK(pct >= 10);  // needed a 2+ digit label; the fixed book is long enough
+  CHECK(pct >= 10);  // needed a 2+ digit label; the fixture book is long enough
   CHECK(pct <= 99);
 
   libraryShow(false);  // redraw the list view with book 0's updated progress
@@ -547,38 +532,13 @@ static void testListRowPercentRightAligned() {
   libraryTap(400, 20);  // header toggle: list -> grid, restore state
 }
 
-// storePack/storeUnpack are inline in store.h precisely so they stay testable
-// on the host: store.cpp itself is hardware-only and never linked in here.
-// Pure arithmetic, so this is free to run anywhere in the order.
-static void testStorePacking() {
-  uint32_t offset;
-  bool italic;
-
-  storeUnpack(storePack(0, false), offset, italic);
-  CHECK_EQ(offset, 0);
-  CHECK(!italic);
-
-  storeUnpack(storePack(0, true), offset, italic);
-  CHECK_EQ(offset, 0);
-  CHECK(italic);
-
-  storeUnpack(storePack(123456, true), offset, italic);
-  CHECK_EQ(offset, 123456);
-  CHECK(italic);
-
-  // The largest offset that survives the round trip.
-  storeUnpack(storePack(0x7FFFFFFF, false), offset, italic);
-  CHECK_EQ(offset, 0x7FFFFFFF);
-  CHECK(!italic);
-}
-
-// Every current book has cover == nullptr, so drawCover's placeholder already
-// states title and author once inside the frame. The grid's own caption band
-// below the cover must stay blank in that case, or the text is stated twice.
+// A book with cover art is captioned with its title and author below the
+// cover; a book without art is not, since drawCover's placeholder already
+// states them inside the frame and a caption would say it twice.
 // (Coordinates match library.cpp's private grid geometry: the top-left cell
 // starts at (24, 54); it is the one cell that stays inside the unrotated test
 // canvas without calling appBegin().)
-static void testLibraryGridNoDuplicateCaption() {
+static void testLibraryGridCaptionMatchesCoverArt() {
   libraryShow(false);
   GFXcanvas1 &gfx = appCanvas();
   const int16_t cellX = 24, cellY = 54, cellH = 350;
@@ -586,7 +546,7 @@ static void testLibraryGridNoDuplicateCaption() {
   for (int16_t y = cellY + COVER_H + 1; y < cellY + cellH && !inkBelowCover; y++)
     for (int16_t x = cellX; x < cellX + COVER_W; x++)
       if (!gfx.getPixel(x, y)) { inkBelowCover = true; break; }
-  CHECK(!inkBelowCover);
+  CHECK(inkBelowCover == catalogBook(0).hasCover);
 }
 
 // THE ORDER OF THE SECOND GROUP IS A CONSTRAINT, NOT A STYLE CHOICE.
@@ -601,23 +561,31 @@ static void testLibraryGridNoDuplicateCaption() {
 // one inherits whatever the last one left behind. The dependencies that exist
 // today:
 //
-//   - testLibraryGridNoDuplicateCaption reads the shared canvas directly and
+//   - testLibraryGridCaptionMatchesCoverArt reads the shared canvas directly and
 //     needs the view to be grid, which is also the initial value. It must not
 //     run after anything that leaves the view on list.
 //   - testListRowPercentRightAligned toggles the view to list and back, so it
 //     is what makes the above hold -- and it is why it must restore grid on the
 //     way out, not merely why it must run before.
-//   - testResumeRebuildsPageHistory sets the fakeSaved* stand-in, and must
-//     clear it again, or every test after it resumes book 0 mid-text instead of
-//     opening it at page 1.
+//   - Opening a book resumes at its saved position, and turning pages saves
+//     one. Tests that need book 0 at page 1 call hostStoreReset() first, and
+//     tests that save positions on purpose clear them again on the way out.
 //
 // Reorder these and the failure will look like a rendering bug and will not be
-// one. A new test that touches the canvas belongs at the end of this group,
-// before testStorePacking.
+// one. A new test that touches the canvas belongs at the end of this group.
 int main() {
+  // Every test reads the fixture library, with a fresh cache each run.
+  if (system("rm -rf /tmp/reader-tests-cache") != 0) return 1;
+  hostStorageSetRoots("fixtures/library", "/tmp/reader-tests-cache");
+  if (!storageBegin()) {
+    printf("FAIL fixtures/library not found: run the tests from simulator/\n");
+    return 1;
+  }
+  catalogScan(nullptr, nullptr);
+
   // Order-independent: pure arithmetic, or rendering into their own canvases.
   testReadingHitTest();
-  testBookTable();
+  testCatalogScan();
   testCoverScaling();
   testTruncateToWidth();
   testLibraryGridHitTest();
@@ -628,11 +596,12 @@ int main() {
   // ---- Below here: shared canvas and screen statics. Order matters. ----
   testReadingProgressPercent();
   testControlsVisibleSurvivesRejectedTurn();
-  testResumeRebuildsPageHistory();
+  testResumeLandsOnSavedPage();
+  testChapterTitles();
   testListRowPercentRightAligned();
-  testLibraryGridNoDuplicateCaption();
+  testLibraryGridCaptionMatchesCoverArt();
 
-  testStorePacking();  // pure again: independent of everything above
+  runEpubTests();  // EPUB reading (test_epub.cpp): independent of the above
   if (failures) {
     printf("%d failure(s)\n", failures);
     return 1;

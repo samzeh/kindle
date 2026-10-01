@@ -13,14 +13,21 @@ LDLIBS := $(shell sdl2-config --libs)
 # except the hardware drivers: main.cpp stands in for those. A new reader file
 # that talks to hardware (e.g. an SD card driver) belongs on this list too,
 # with a stand-in added to main.cpp.
-HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp
+HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp $(READER)/storage_sd.cpp
 READER_SOURCES := $(filter-out $(HARDWARE_ONLY),$(wildcard $(READER)/*.cpp))
 
-SOURCES := main.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp
-HEADERS := $(wildcard shim/*.h) $(wildcard $(READER)/*.h) $(wildcard $(READER)/*/*.h)
+# C files in reader/ (the JPEG decoder) are compiled as C, into obj/.
+READER_C_OBJECTS := $(patsubst $(READER)/%.c,obj/%.o,$(wildcard $(READER)/*.c))
 
-reader-sim: $(SOURCES) $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@ $(LDLIBS)
+SOURCES := main.cpp host_platform.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp
+HEADERS := $(wildcard *.h) $(wildcard shim/*.h) $(wildcard $(READER)/*.h) $(wildcard $(READER)/*/*.h)
+
+obj/%.o: $(READER)/%.c $(HEADERS)
+	@mkdir -p obj
+	$(CC) -O2 -I$(READER) -c $< -o $@
+
+reader-sim: $(SOURCES) $(READER_C_OBJECTS) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(SOURCES) $(READER_C_OBJECTS) -o $@ $(LDLIBS)
 
 run: reader-sim
 	./reader-sim
@@ -29,13 +36,19 @@ run: reader-sim
 # main.cpp, so tests.cpp stands in for the screen driver and Serial.
 TESTFLAGS := -std=c++17 -O1 -DARDUINO=100 -Ishim -I$(READER) -I$(GFX)
 
-reader-tests: tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp $(HEADERS)
-	$(CXX) $(TESTFLAGS) tests.cpp $(READER_SOURCES) $(GFX)/Adafruit_GFX.cpp -o $@
+reader-tests: tests.cpp test_epub.cpp host_platform.cpp $(READER_SOURCES) $(READER_C_OBJECTS) $(GFX)/Adafruit_GFX.cpp $(HEADERS)
+	$(CXX) $(TESTFLAGS) tests.cpp test_epub.cpp host_platform.cpp $(READER_SOURCES) $(READER_C_OBJECTS) $(GFX)/Adafruit_GFX.cpp -o $@
+
+# Prints what the reader makes of an EPUB: ./epub-dump book.epub [--text]
+EPUB_SOURCES := $(READER)/zip.cpp $(READER)/xml.cpp $(READER)/ascii.cpp $(READER)/epub.cpp $(READER)/convert.cpp
+
+epub-dump: epubdump.cpp host_platform.cpp $(EPUB_SOURCES) $(READER_C_OBJECTS) $(HEADERS)
+	$(CXX) $(TESTFLAGS) epubdump.cpp host_platform.cpp $(EPUB_SOURCES) $(READER_C_OBJECTS) -o $@
 
 test: reader-tests
 	./reader-tests
 
 clean:
-	rm -f reader-sim reader-tests
+	rm -rf reader-sim reader-tests epub-dump obj
 
 .PHONY: run test clean

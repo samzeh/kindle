@@ -19,6 +19,15 @@
 // ---- Front light ----
 #define PIN_FRONTLIGHT 19
 
+// ---- microSD card, on its own SPI bus (HSPI) ----
+// Not shared with the screen, whose pins are driven directly by epd.cpp.
+// Avoid GPIO12 (a boot strapping pin: a card pulling it high stops the
+// ESP32 booting) and GPIO19 (the front light).
+#define PIN_SD_SCK  14
+#define PIN_SD_MOSI 13
+#define PIN_SD_MISO 27
+#define PIN_SD_CS   25
+
 // ---- Screen orientation ----
 // Set to 1 if the image comes out mirrored (this panel's rows run in the
 // opposite direction to how images are stored in memory).

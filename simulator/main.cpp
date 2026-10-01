@@ -1,7 +1,14 @@
 // Desktop simulator for the e-reader. Builds every .cpp in reader/ except
-// the hardware drivers (epd.cpp, touch.cpp, store.cpp), which this file
-// stands in for -- so it runs the same reader code as the ESP32, screens
+// the hardware drivers (epd.cpp, touch.cpp, store.cpp, storage_sd.cpp):
+// this file stands in for the screen, and host_platform.cpp for storage and
+// saved settings -- so it runs the same reader code as the ESP32, screens
 // and all, and shows it in a window.
+//
+// Books are the .epub files in simulator/books/ (tools/fetch_books.sh
+// downloads four), and the reader's cache goes in simulator/.cache/:
+//   --books DIR     read books from DIR instead
+//   --cache DIR     keep the cache in DIR instead
+//   --reset-cache   delete the cache first, as if every book were new
 //
 //   click          tap: in a book, left third = previous page, middle =
 //                  controls, right third = next page. In the library, a
@@ -18,16 +25,18 @@
 //
 // ./reader-sim --screenshot page.bmp nnp  turns pages as listed (n = next,
 // p = previous, v = toggle the library view, l = back to the library, o =
-// open book 0), saves the screen to page.bmp and exits.
+// open book 0, c = show the control bar), saves the screen to page.bmp and
+// exits.
 #include <SDL.h>
+#include <string>
 #include <vector>
 
 #include "Arduino.h"
 #include "app.h"
 #include "board_config.h"
 #include "epd.h"
+#include "host_platform.h"
 #include "screens.h"
-#include "store.h"
 
 SerialPort Serial;
 
@@ -100,55 +109,6 @@ void epdShowPartial(const uint8_t *image) {
 
 void epdSleep() {}
 
-// ---- Stand-in for NVS (reader/store.h), backed by a file ----
-
-static const char *STATE_FILE = "reader-sim.state";
-static const int MAX_BOOKS = 32;
-
-struct SimState {
-  uint32_t progress[MAX_BOOKS];
-  bool saved[MAX_BOOKS];
-  uint8_t view;
-};
-
-static SimState simState = {};
-
-static void simStateWrite() {
-  FILE *f = fopen(STATE_FILE, "wb");
-  if (!f) return;
-  fwrite(&simState, sizeof(simState), 1, f);
-  fclose(f);
-}
-
-void storeBegin() {
-  FILE *f = fopen(STATE_FILE, "rb");
-  if (!f) return;
-  if (fread(&simState, sizeof(simState), 1, f) != 1) simState = SimState{};
-  fclose(f);
-}
-
-void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
-  if (book >= MAX_BOOKS) return;
-  simState.progress[book] = storePack(offset, italic);
-  simState.saved[book] = true;
-  simStateWrite();
-}
-
-bool storeLoadProgress(uint8_t book, uint32_t &offset, bool &italic) {
-  if (book >= MAX_BOOKS || !simState.saved[book]) return false;
-  storeUnpack(simState.progress[book], offset, italic);
-  return true;
-}
-
-void storeSaveView(uint8_t view) {
-  simState.view = view;
-  simStateWrite();
-}
-
-uint8_t storeLoadView() {
-  return simState.view;
-}
-
 // ---- Window and input ----
 
 // Turns one input character into the app action it stands for: shared by the
@@ -195,6 +155,13 @@ static void simKey(char key) {
       }
       appTap(126, 80);
       break;
+    case 'c':  // reading only: a tap in the middle third raises the control bar
+      if (screen != SCREEN_READING) {
+        printf("'c' ignored: it shows a book's control bar, and no book is open.\n");
+        break;
+      }
+      appTap(240, 400);
+      break;
     default: appTurnPage(key == 'p' ? -1 : 1); break;  // both screens page
   }
 }
@@ -202,10 +169,29 @@ static void simKey(char key) {
 int main(int argc, char **argv) {
   const char *screenshotFile = nullptr;
   const char *screenshotTurns = "";
-  if (argc >= 3 && strcmp(argv[1], "--screenshot") == 0) {
-    screenshotFile = argv[2];
-    if (argc >= 4) screenshotTurns = argv[3];
+  const char *booksDir = "books", *cacheDir = ".cache";
+  bool resetCache = false;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
+      screenshotFile = argv[++i];
+      if (i + 1 < argc && argv[i + 1][0] != '-') screenshotTurns = argv[++i];
+    } else if (strcmp(argv[i], "--books") == 0 && i + 1 < argc) {
+      booksDir = argv[++i];
+    } else if (strcmp(argv[i], "--cache") == 0 && i + 1 < argc) {
+      cacheDir = argv[++i];
+    } else if (strcmp(argv[i], "--reset-cache") == 0) {
+      resetCache = true;
+    } else {
+      fprintf(stderr, "unknown option %s\n", argv[i]);
+      return 2;
+    }
   }
+  if (resetCache) {
+    std::string cmd = std::string("rm -rf '") + cacheDir + "'";
+    if (system(cmd.c_str()) != 0) fprintf(stderr, "could not delete %s\n", cacheDir);
+  }
+  hostStorageSetRoots(booksDir, cacheDir);
+  hostStoreUseFile((std::string(cacheDir) + "/settings.txt").c_str());
 
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
     fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -244,7 +230,7 @@ int main(int argc, char **argv) {
 
   printf("Click to tap (left third = back), arrow keys or n/p to turn pages, "
          "v to toggle library view, l to return to the library, o to open "
-         "book 0, q to quit.\n");
+         "book 0, c to show the control bar, q to quit.\n");
 
   SDL_Event event;
   while (SDL_WaitEvent(&event)) {
@@ -264,6 +250,7 @@ int main(int argc, char **argv) {
         case SDLK_v: simKey('v'); break;
         case SDLK_l: simKey('l'); break;
         case SDLK_o: simKey('o'); break;
+        case SDLK_c: simKey('c'); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }

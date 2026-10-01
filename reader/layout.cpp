@@ -1,5 +1,7 @@
 #include "layout.h"
 
+#include "textformat.h"
+
 // On the panel a 0 bit is black and a 1 bit is white.
 static const uint16_t INK = 0x0000;
 static const uint16_t PAPER = 0xFFFF;
@@ -10,8 +12,8 @@ static const int16_t MARGIN_BOTTOM = 52;  // leaves room for the footer
 static const int MAX_WORDS_PER_LINE = 48;
 static const int16_t MAX_JUSTIFY_STRETCH = 2;  // extra gap allowed, in spaces
 
-PageLayout::PageLayout(Adafruit_GFX &gfx, const char *text, const PageFonts &fonts)
-  : _gfx(gfx), _text(text), _len(strlen(text)), _fonts(fonts) {}
+PageLayout::PageLayout(Adafruit_GFX &gfx, TextSource &text, const PageFonts &fonts)
+  : _gfx(gfx), _text(text), _fonts(fonts) {}
 
 const GFXfont *PageLayout::font(bool bold, bool italic) const {
   if (bold) return italic ? _fonts.boldItalic : _fonts.bold;
@@ -24,13 +26,13 @@ int16_t PageLayout::charAdvance(const GFXfont *f, char c) const {
   return f->glyph[ch - f->first].xAdvance;
 }
 
-// Width of a word in pixels. '_' toggles italics and takes no space;
+// Width of a word in pixels. TXT_ITALIC toggles italics and takes no space;
 // `italic` is updated to the style in effect after the word.
-int16_t PageLayout::measureWord(uint32_t start, uint16_t len, bool bold, bool &italic) const {
+int16_t PageLayout::measureWord(uint32_t start, uint16_t len, bool bold, bool &italic) {
   int16_t width = 0;
   for (uint16_t i = 0; i < len; i++) {
-    char c = _text[start + i];
-    if (c == '_') {
+    char c = _text.at(start + i);
+    if (c == TXT_ITALIC) {
       italic = !italic;
       continue;
     }
@@ -43,8 +45,8 @@ void PageLayout::drawWord(int16_t x, int16_t baseline, const Word &w, bool bold,
   _gfx.setFont(font(bold, italic));
   _gfx.setCursor(x, baseline);
   for (uint16_t i = 0; i < w.len; i++) {
-    char c = _text[w.start + i];
-    if (c == '_') {
+    char c = _text.at(w.start + i);
+    if (c == TXT_ITALIC) {
       italic = !italic;
       _gfx.setFont(font(bold, italic));
       continue;
@@ -53,32 +55,12 @@ void PageLayout::drawWord(int16_t x, int16_t baseline, const Word &w, bool bold,
   }
 }
 
-uint32_t PageLayout::paragraphStart(uint32_t pos) const {
-  while (pos > 0 && _text[pos - 1] != '\n') pos--;
-  return pos;
-}
-
-uint32_t PageLayout::paragraphEnd(uint32_t pos) const {
-  while (pos < _len && _text[pos] != '\n') pos++;
-  return pos;
-}
-
-bool PageLayout::isHeading(uint32_t paraStart) const {
-  return _text[paraStart] == '#' && _text[paraStart + 1] == ' ';
-}
-
-void PageLayout::drawFooter(uint32_t offset) {
-  char label[8];
-  snprintf(label, sizeof(label), "%u%%", (unsigned)((uint64_t)offset * 100 / _len));
-  _gfx.setFont(_fonts.footer);
-  int16_t x1, y1;
-  uint16_t w, h;
-  _gfx.getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-  _gfx.setCursor((_gfx.width() - w) / 2 - x1, _gfx.height() - 20);
-  _gfx.print(label);
+bool PageLayout::atParagraphEnd(uint32_t pos) {
+  return pos >= _text.length() || _text.at(pos) == '\n';
 }
 
 PagePos PageLayout::layoutPage(PagePos start, bool draw) {
+  const uint32_t len = _text.length();
   const int16_t maxWidth = _gfx.width() - 2 * MARGIN_X;
   const int16_t bottom = _gfx.height() - MARGIN_BOTTOM;
   const int16_t lineHeight = _fonts.regular->yAdvance;
@@ -94,31 +76,34 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
 
   uint32_t pos = start.offset;
   bool italic = start.italic;
-  int16_t y = MARGIN_TOP;  // top of the next line
+  bool heading = start.inHeading;  // for a paragraph continued from the last page
+  int16_t y = MARGIN_TOP;          // top of the next line
   bool pageEmpty = true;
 
-  while (pos < _len) {
-    if (_text[pos] == '\n') {  // empty paragraph
+  while (pos < len) {
+    char c = _text.at(pos);
+    if (c == '\n') {  // between paragraphs
       pos++;
       continue;
     }
-    const uint32_t paraStart = paragraphStart(pos);
-    const uint32_t paraEnd = paragraphEnd(pos);
-    const bool heading = isHeading(paraStart);
-    const bool atParaStart = (pos == paraStart);
+    const bool atParaStart = pos == 0 || _text.at(pos - 1) == '\n';
+    bool noIndent = false;
+    if (atParaStart) {
+      heading = c == TXT_HEADING;
+      noIndent = c == TXT_NOINDENT;
+    }
 
     if (heading && atParaStart) {
       int16_t spaceBefore = pageEmpty ? 0 : lineHeight;
       // Keep a heading together with at least one line of the text below it.
       if (y + spaceBefore + 2 * lineHeight > bottom) break;
       y += spaceBefore;
-      pos += 2;  // skip "# "
     }
-    const bool indentFirstLine =
-      !heading && atParaStart && paraStart > 0 && !isHeading(paragraphStart(paraStart - 1));
+    if (atParaStart && (heading || noIndent)) pos++;  // skip the marker
+    const bool indentFirstLine = atParaStart && !heading && !noIndent;
 
     bool firstLine = true;
-    while (pos < paraEnd) {
+    while (!atParagraphEnd(pos)) {
       if (y + lineHeight > bottom) break;
 
       // Greedily collect the words that fit on this line.
@@ -130,10 +115,10 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
       uint32_t p = pos;
       bool lineItalic = italic;
       while (count < MAX_WORDS_PER_LINE) {
-        while (p < paraEnd && _text[p] == ' ') p++;
-        if (p >= paraEnd) break;
+        while (!atParagraphEnd(p) && _text.at(p) == ' ') p++;
+        if (atParagraphEnd(p)) break;
         uint32_t wordStart = p;
-        while (p < paraEnd && _text[p] != ' ') p++;
+        while (!atParagraphEnd(p) && _text.at(p) != ' ') p++;
         bool wordItalic = lineItalic;
         int16_t w = measureWord(wordStart, p - wordStart, heading, wordItalic);
         int16_t needed = lineWidth + (count ? spaceWidth : 0) + w;
@@ -145,8 +130,8 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
         lineWidth = needed;
         lineItalic = wordItalic;
       }
-      while (p < paraEnd && _text[p] == ' ') p++;
-      const bool lastLine = (p >= paraEnd);
+      while (!atParagraphEnd(p) && _text.at(p) == ' ') p++;
+      const bool lastLine = atParagraphEnd(p);
 
       if (draw) {
         int16_t x = MARGIN_X + indent;
@@ -176,11 +161,10 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
       pageEmpty = false;
     }
 
-    if (pos < paraEnd) break;  // page is full mid-paragraph
-    pos = paraEnd < _len ? paraEnd + 1 : _len;
+    if (!atParagraphEnd(pos)) break;  // page is full mid-paragraph
+    if (pos < len) pos++;             // past the '\n'
     if (heading) y += lineHeight / 2;
   }
 
-  if (draw) drawFooter(start.offset);
-  return { pos, italic };
+  return { pos, italic, heading && pos < len && !(pos == 0 || _text.at(pos - 1) == '\n') };
 }

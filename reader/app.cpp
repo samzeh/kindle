@@ -2,10 +2,13 @@
 #include <Adafruit_GFX.h>
 
 #include "board_config.h"
+#include "busy.h"
+#include "catalog.h"
 #include "epd.h"
 #include "library.h"
 #include "reading.h"
 #include "screens.h"
+#include "storage.h"
 #include "store.h"
 
 // Full-screen buffer (48 KB): each screen is drawn in RAM, then sent in one
@@ -15,6 +18,13 @@ static Screen current = SCREEN_LIBRARY;
 
 GFXcanvas1 &appCanvas() {
   return canvas;
+}
+
+void appRefresh(bool full) {
+  static bool panelReady = false;
+  if (full || !panelReady) epdShowFull(canvas.getBuffer());
+  else epdShowPartial(canvas.getBuffer());
+  panelReady = true;
 }
 
 Screen appCurrentScreen() {
@@ -33,13 +43,22 @@ void appGoTo(Screen s) {
   showCurrent(false);
 }
 
+// Shown while new books' titles and covers are read at startup.
+static void onImportProgress(uint16_t done, uint16_t total, const char *name, void *) {
+  char line[48];
+  snprintf(line, sizeof(line), "Adding book %u of %u", (unsigned)done + 1, (unsigned)total);
+  busyShow(line, name, total ? done * 100 / total : -1);
+}
+
 void appBegin() {
   storeBegin();
   canvas.setRotation(SCREEN_ROTATION);
-  // The one full refresh: after power-up the panel needs it to know what is
-  // on screen before any no-flash refresh can compare against it.
+  if (storageBegin()) catalogScan(onImportProgress, nullptr);
+  else Serial.println("app: no book storage; the library will be empty");
+  // appRefresh makes this the power-up full refresh, unless a progress
+  // screen for new books already did it.
   current = SCREEN_LIBRARY;
-  showCurrent(true);
+  showCurrent(false);
 }
 
 void appTurnPage(int delta) {

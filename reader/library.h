@@ -20,7 +20,7 @@ enum LibraryAction : uint8_t {
 
 struct LibraryHit {
   LibraryAction action;
-  uint8_t book;  // meaningful only when action is LIB_OPEN_BOOK
+  uint16_t book;  // catalog index; meaningful only when action is LIB_OPEN_BOOK
 };
 
 // What a tap at (x, y) means on the given page of the given view. Pure, so it
