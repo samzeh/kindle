@@ -17,25 +17,25 @@ void storeBegin() {
   }
 }
 
-static void progressKey(uint8_t book, char *out, size_t n) {
-  snprintf(out, n, "p%u", (unsigned)book);
+// One NVS key per book, from its id: "p1a2b3c4d" (NVS keys are at most 15
+// characters).
+static void progressKey(uint32_t bookId, char *out, size_t n) {
+  snprintf(out, n, "p%08x", (unsigned)bookId);
 }
 
-void storeSaveProgress(uint8_t book, uint32_t offset, bool italic) {
-  char key[8];
-  progressKey(book, key, sizeof(key));
-  // One page turn costs one NVS entry, not two: offset and italic travel
-  // packed into a single uint32 (see storePack, covered by testStorePacking),
-  // and each book has one key. That is what keeps the flash erase budget
-  // comfortable at reading speed.
-  prefs.putUInt(key, storePack(offset, italic));
+void storeSaveProgress(uint32_t bookId, uint32_t offset) {
+  char key[12];
+  progressKey(bookId, key, sizeof(key));
+  // One page turn costs one NVS entry: that is what keeps the flash erase
+  // budget comfortable at reading speed.
+  prefs.putUInt(key, offset);
 }
 
-bool storeLoadProgress(uint8_t book, uint32_t &offset, bool &italic) {
-  char key[8];
-  progressKey(book, key, sizeof(key));
+bool storeLoadProgress(uint32_t bookId, uint32_t &offset) {
+  char key[12];
+  progressKey(bookId, key, sizeof(key));
   if (!prefs.isKey(key)) return false;
-  storeUnpack(prefs.getUInt(key, 0), offset, italic);
+  offset = prefs.getUInt(key, 0);
   return true;
 }
 

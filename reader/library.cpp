@@ -4,7 +4,7 @@
 #include <Fonts/FreeSerifBold9pt7b.h>
 #include <stdio.h>  // snprintf, for the footer and list progress labels
 
-#include "books.h"
+#include "catalog.h"
 #include "cover.h"
 #include "epd.h"
 #include "reading.h"
@@ -43,7 +43,8 @@ static bool viewLoaded = false;
 
 uint8_t libraryPageCount(uint8_t v) {
   int16_t perPage = v == LIB_VIEW_GRID ? GRID_PER_PAGE : LIST_PER_PAGE;
-  return (uint8_t)((BOOK_COUNT + perPage - 1) / perPage);
+  int16_t pages = (int16_t)((catalogCount() + perPage - 1) / perPage);
+  return (uint8_t)(pages < 1 ? 1 : pages > 255 ? 255 : pages);
 }
 
 static LibraryHit gridHitTest(int16_t x, int16_t y, uint8_t p) {
@@ -51,8 +52,8 @@ static LibraryHit gridHitTest(int16_t x, int16_t y, uint8_t p) {
     if (y < GRID_ROW_Y[row] || y >= GRID_ROW_Y[row] + GRID_CELL_H) continue;
     for (uint8_t col = 0; col < 2; col++) {
       if (x < GRID_COL_X[col] || x >= GRID_COL_X[col] + COVER_W) continue;
-      uint8_t index = (uint8_t)(p * GRID_PER_PAGE + row * 2 + col);
-      if (index >= BOOK_COUNT) return { LIB_NONE, 0 };
+      uint16_t index = (uint16_t)(p * GRID_PER_PAGE + row * 2 + col);
+      if (index >= catalogCount()) return { LIB_NONE, 0 };
       return { LIB_OPEN_BOOK, index };
     }
   }
@@ -64,8 +65,8 @@ static LibraryHit listHitTest(int16_t x, int16_t y, uint8_t p) {
   if (y < LIST_TOP) return { LIB_NONE, 0 };
   int16_t row = (y - LIST_TOP) / LIST_ROW_H;
   if (row < 0 || row >= LIST_PER_PAGE) return { LIB_NONE, 0 };
-  uint8_t index = (uint8_t)(p * LIST_PER_PAGE + row);
-  if (index >= BOOK_COUNT) return { LIB_NONE, 0 };
+  uint16_t index = (uint16_t)(p * LIST_PER_PAGE + row);
+  if (index >= catalogCount()) return { LIB_NONE, 0 };
   return { LIB_OPEN_BOOK, index };
 }
 
@@ -113,43 +114,44 @@ static void drawFooter(Adafruit_GFX &gfx) {
 
 static void drawGrid(Adafruit_GFX &gfx) {
   for (uint8_t cell = 0; cell < GRID_PER_PAGE; cell++) {
-    uint8_t index = (uint8_t)(page * GRID_PER_PAGE + cell);
-    if (index >= BOOK_COUNT) break;
+    uint16_t index = (uint16_t)(page * GRID_PER_PAGE + cell);
+    if (index >= catalogCount()) break;
+    const BookInfo &book = catalogBook(index);
     int16_t x = GRID_COL_X[cell % 2];
     int16_t y = GRID_ROW_Y[cell / 2];
-    drawCover(gfx, BOOKS[index], x, y, COVER_W, COVER_H);
+    drawCover(gfx, book, x, y, COVER_W, COVER_H);
     // Only caption books with real cover art: without it, drawCover's own
     // typographic placeholder already states the title and author once,
     // inside the frame, so a caption here would say it twice.
-    if (BOOKS[index].cover) {
+    if (book.hasCover) {
       gfx.setTextColor(INK);
-      drawCentredText(gfx, BOOKS[index].title, &FreeSerifBold9pt7b, x, COVER_W,
-                      y + COVER_H + 20);
-      drawCentredText(gfx, BOOKS[index].author, &FreeSerif9pt7b, x, COVER_W,
-                      y + COVER_H + 38);
+      drawCentredText(gfx, book.title, &FreeSerifBold9pt7b, x, COVER_W, y + COVER_H + 20);
+      drawCentredText(gfx, book.author, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 38);
     }
   }
 }
 
-// The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so
-// drawCover renders it as a frame only (no placeholder title/author). So,
+// The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so for
+// a book without cover art drawCover renders it as a frame only (no
+// placeholder title/author). So,
 // unlike the grid, the row's title/author/progress are drawn here for every
 // book regardless of cover art -- they are the only place that text appears.
 static void drawList(Adafruit_GFX &gfx) {
   for (uint8_t row = 0; row < LIST_PER_PAGE; row++) {
-    uint8_t index = (uint8_t)(page * LIST_PER_PAGE + row);
-    if (index >= BOOK_COUNT) break;
+    uint16_t index = (uint16_t)(page * LIST_PER_PAGE + row);
+    if (index >= catalogCount()) break;
+    const BookInfo &book = catalogBook(index);
     int16_t top = LIST_TOP + row * LIST_ROW_H;
 
-    drawCover(gfx, BOOKS[index], MARGIN_X, top + 5, THUMB_W, THUMB_H);
+    drawCover(gfx, book, MARGIN_X, top + 5, THUMB_W, THUMB_H);
 
     gfx.setTextColor(INK);
     char buf[48];
-    truncateToWidth(gfx, BOOKS[index].title, &FreeSerifBold9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
+    truncateToWidth(gfx, book.title, &FreeSerifBold9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
     gfx.setCursor(LIST_TEXT_X, top + 30);
     gfx.print(buf);
 
-    truncateToWidth(gfx, BOOKS[index].author, &FreeSerif9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
+    truncateToWidth(gfx, book.author, &FreeSerif9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
     gfx.setCursor(LIST_TEXT_X, top + 54);
     gfx.print(buf);
 
@@ -160,8 +162,7 @@ static void drawList(Adafruit_GFX &gfx) {
     if (filled > 0) gfx.fillRect(LIST_TEXT_X + 1, barY + 1, filled, LIST_BAR_H - 2, INK);
 
     // Right-aligned at x = SCREEN_W - MARGIN_X: measure, don't guess a fixed
-    // offset, since "0%" and "100%" are different widths (see PageLayout::
-    // drawFooter, which measures the same "%u%%" label for the same reason).
+    // offset, since "0%" and "100%" are different widths.
     char label[8];
     snprintf(label, sizeof(label), "%u%%", (unsigned)pct);
     gfx.setFont(&FreeSerif9pt7b);
@@ -171,7 +172,7 @@ static void drawList(Adafruit_GFX &gfx) {
     gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, barY + LIST_BAR_H);
     gfx.print(label);
 
-    if (row + 1 < LIST_PER_PAGE && (uint8_t)(index + 1) < BOOK_COUNT) {
+    if (row + 1 < LIST_PER_PAGE && index + 1 < catalogCount()) {
       gfx.drawFastHLine(MARGIN_X, top + LIST_ROW_H - 1, SCREEN_W - 2 * MARGIN_X, INK);
     }
   }
@@ -196,11 +197,18 @@ void libraryShow(bool fullRefresh) {
   gfx.fillScreen(PAPER);
   gfx.setTextWrap(false);
   drawHeader(gfx);
-  if (view == LIB_VIEW_GRID) drawGrid(gfx);
-  else drawList(gfx);
+  if (catalogCount() == 0) {
+    gfx.setTextColor(INK);
+    drawCentredText(gfx, "No books yet", &FreeSerifBold9pt7b, 0, SCREEN_W, SCREEN_H / 2 - 12);
+    drawCentredText(gfx, "Add .epub files to the /books folder", &FreeSerif9pt7b, 0, SCREEN_W,
+                    SCREEN_H / 2 + 14);
+  } else if (view == LIB_VIEW_GRID) {
+    drawGrid(gfx);
+  } else {
+    drawList(gfx);
+  }
   drawFooter(gfx);
-  if (fullRefresh) epdShowFull(gfx.getBuffer());
-  else epdShowPartial(gfx.getBuffer());
+  appRefresh(fullRefresh);
 }
 
 void libraryTurnPage(int delta) {
@@ -216,8 +224,8 @@ void libraryTap(int16_t x, int16_t y) {
   LibraryHit hit = libraryHitTest(x, y, page, view);
   switch (hit.action) {
     case LIB_OPEN_BOOK:
-      readingOpenBook(hit.book);
-      appGoTo(SCREEN_READING);
+      if (readingOpenBook(hit.book)) appGoTo(SCREEN_READING);
+      else libraryShow(false);  // could not be read: back to the shelf
       break;
     case LIB_PREV_PAGE: libraryTurnPage(-1); break;
     case LIB_NEXT_PAGE: libraryTurnPage(1); break;

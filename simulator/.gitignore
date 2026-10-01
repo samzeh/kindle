@@ -1,3 +1,7 @@
 reader-sim
 reader-tests
 reader-sim.state
+obj/
+epub-dump
+books/
+.cache/

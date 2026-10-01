@@ -16,13 +16,14 @@ enum ReadingAction : uint8_t {
 // tested on the host.
 ReadingAction readingHitTest(int16_t x, int16_t y, bool controlsVisible);
 
-// Switches to book `index`, at its saved position if it has one, otherwise at
-// the start. Resuming replays pagination from the start of the book, so the
-// restored page keeps its real page number and can still be turned back.
-void readingOpenBook(uint8_t index);
+// Opens book `index` (catalog order) at its saved position, or the start.
+// The first time a book is opened its text is converted and its pages are
+// counted (a few seconds on the device, behind a progress screen); after
+// that it opens straight away. False if the book cannot be read.
+bool readingOpenBook(uint16_t index);
 
-// How far through `book` the reader has got, 0-100. Books never opened read 0.
-uint32_t readingProgressPercent(uint8_t book);
+// How far through a book the reader has got, 0-100. Books never opened read 0.
+uint32_t readingProgressPercent(uint16_t index);
 
 // Draws the current page.
 void readingShow(bool fullRefresh);
@@ -32,3 +33,13 @@ void readingTap(int16_t x, int16_t y);
 
 // +1 = next page, -1 = previous page.
 void readingTurnPage(int delta);
+
+// The open book's current page (0-based), its page count, and the title of
+// the chapter the current page is in ("" if the book has no chapters).
+uint32_t readingCurrentPage();
+uint32_t readingPageCount();
+const char *readingChapterTitle();
+
+// Bump when anything changes where pages break (fonts, margins, layout
+// rules), so every book's page count is redone.
+static const uint16_t LAYOUT_VERSION = 1;

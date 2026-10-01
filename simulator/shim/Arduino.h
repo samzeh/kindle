@@ -64,5 +64,6 @@ public:
     fflush(stdout);
     return n;
   }
+  size_t println(const char *s) { return (size_t)printf("%s\n", s); }
 };
 extern SerialPort Serial;

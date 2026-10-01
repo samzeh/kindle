@@ -25,3 +25,8 @@ Screen appCurrentScreen();
 
 // The one 48 KB buffer every screen draws into. Never allocate another.
 GFXcanvas1 &appCanvas();
+
+// Sends the canvas to the screen: full = the flashing refresh, otherwise the
+// no-flash one. The first refresh after power-up is always full, whatever is
+// asked, since the panel needs one before a no-flash update can work.
+void appRefresh(bool full);
