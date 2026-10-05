@@ -92,7 +92,6 @@ static void drawHeader(Adafruit_GFX &gfx) {
   gfx.setFont(&FreeSerif9pt7b);
   gfx.setCursor(TOGGLE_X + 8, 30);
   gfx.print(view == LIB_VIEW_GRID ? "List" : "Grid");
-  gfx.drawFastHLine(0, HEADER_H - 1, SCREEN_W, INK);
 }
 
 static void drawFooter(Adafruit_GFX &gfx) {
@@ -171,10 +170,6 @@ static void drawList(Adafruit_GFX &gfx) {
     gfx.getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
     gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, barY + LIST_BAR_H);
     gfx.print(label);
-
-    if (row + 1 < LIST_PER_PAGE && index + 1 < catalogCount()) {
-      gfx.drawFastHLine(MARGIN_X, top + LIST_ROW_H - 1, SCREEN_W - 2 * MARGIN_X, INK);
-    }
   }
 }
 
