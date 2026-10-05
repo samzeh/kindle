@@ -2,6 +2,8 @@
 #include <Adafruit_GFX.h>
 #include <Fonts/FreeSerif9pt7b.h>
 #include <Fonts/FreeSerifBold9pt7b.h>
+#include <Fonts/FreeSerif12pt7b.h>
+#include <Fonts/FreeSerifBold12pt7b.h>
 #include <stdio.h>  // snprintf, for the footer and list progress labels
 #include <string.h>
 
@@ -41,13 +43,14 @@ static int16_t gridRowY(int16_t row) {
   return GRID_TOP + row * GRID_ROW_PITCH;
 }
 
-// List: six rows, thumbnail then title, author and a progress bar.
+// List: six rows, each a thumbnail, then the title (up to two lines) and a
+// progress line like the one at the bottom of a book's pages.
 static const int16_t LIST_PER_PAGE = 6;
 static const int16_t LIST_TOP = 50;
 static const int16_t LIST_ROW_H = 118;
 static const int16_t LIST_TEXT_X = 112;   // MARGIN_X + THUMB_W + 16
 static const int16_t LIST_BAR_W = 280;
-static const int16_t LIST_BAR_H = 8;
+static const int16_t LIST_BAR_DY = 90;    // the progress line, from the row's top
 // Text column right edge is the page's right margin, matching MARGIN_X.
 static const int16_t LIST_TEXT_MAX_W = SCREEN_W - MARGIN_X - LIST_TEXT_X;  // 344
 
@@ -125,11 +128,12 @@ static void drawFooter(Adafruit_GFX &gfx) {
   }
 }
 
-// Draws text centred in a box `w` wide, on at most two lines: as many whole
-// words as fit on the first, the rest on the second, shortened with "..." if
-// it is still too long. Nothing is drawn outside the box.
-static void drawCentredTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
-                                int16_t x, int16_t w, int16_t baseline, int16_t lineGap) {
+// Draws text on at most two lines within a box `w` wide starting at x:
+// as many whole words as fit on the first, the rest on the second,
+// shortened with "..." if it is still too long. Nothing is drawn outside
+// the box. Centred in the box, or left-aligned at x.
+static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *font, int16_t x,
+                         int16_t w, int16_t baseline, int16_t lineGap, bool centred) {
   char line[64];
   size_t fit = 0, end = 0;
   gfx.setFont(font);
@@ -146,16 +150,31 @@ static void drawCentredTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfo
     if (lw > w) break;
     fit = end = next;
   }
-  if (fit == 0) {  // not even the first word fits: shorten it on one line
-    drawCentredText(gfx, text, font, x, w, baseline);
-    return;
+  const char *rest = text;
+  if (fit > 0) {  // else not even one word fits: shorten it on the first line
+    memcpy(line, text, fit);
+    line[fit] = '\0';
+    rest = text + fit;
+    while (*rest == ' ') rest++;
   }
-  memcpy(line, text, fit);
-  line[fit] = '\0';
-  drawCentredText(gfx, line, font, x, w, baseline);
-  const char *rest = text + fit;
-  while (*rest == ' ') rest++;
-  if (*rest) drawCentredText(gfx, rest, font, x, w, baseline + lineGap);
+  char buf[64];
+  const char *lines[2] = { fit > 0 ? line : rest, fit > 0 ? rest : "" };
+  for (int16_t i = 0; i < 2 && *lines[i]; i++) {
+    int16_t y = baseline + i * lineGap;
+    if (centred) {
+      drawCentredText(gfx, lines[i], font, x, w, y);
+    } else {
+      truncateToWidth(gfx, lines[i], font, w, buf, sizeof(buf));
+      gfx.setCursor(x, y);
+      gfx.print(buf);
+    }
+  }
+}
+
+// Where a line of text in `font` goes so its capitals are centred on y.
+static int16_t baselineCentredOn(const GFXfont &font, int16_t y) {
+  const GFXglyph &cap = font.glyph['H' - font.first];
+  return y - cap.yOffset - (cap.height - 1) / 2;
 }
 
 static void drawGrid(Adafruit_GFX &gfx) {
@@ -167,15 +186,14 @@ static void drawGrid(Adafruit_GFX &gfx) {
     int16_t y = gridRowY(cell / GRID_COLS);
     drawCover(gfx, book, x, y, COVER_W, COVER_H);
     gfx.setTextColor(INK);
-    drawCentredTwoLines(gfx, book.title, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 16, 18);
+    drawTwoLines(gfx, book.title, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 16, 18, true);
   }
 }
 
 // The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so for
 // a book without cover art drawCover renders it as a grey block only (no
-// placeholder title/author). So,
-// unlike the grid, the row's title/author/progress are drawn here for every
-// book regardless of cover art -- they are the only place that text appears.
+// placeholder title). The row's title, drawn here for every book, is the
+// only place it appears.
 static void drawList(Adafruit_GFX &gfx) {
   for (uint8_t row = 0; row < LIST_PER_PAGE; row++) {
     uint16_t index = (uint16_t)(page * LIST_PER_PAGE + row);
@@ -186,30 +204,26 @@ static void drawList(Adafruit_GFX &gfx) {
     drawCover(gfx, book, MARGIN_X, top + 5, THUMB_W, THUMB_H);
 
     gfx.setTextColor(INK);
-    char buf[48];
-    truncateToWidth(gfx, book.title, &FreeSerifBold9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
-    gfx.setCursor(LIST_TEXT_X, top + 30);
-    gfx.print(buf);
+    drawTwoLines(gfx, book.title, &FreeSerifBold12pt7b, LIST_TEXT_X, LIST_TEXT_MAX_W, top + 30, 26,
+                 false);
 
-    truncateToWidth(gfx, book.author, &FreeSerif9pt7b, LIST_TEXT_MAX_W, buf, sizeof(buf));
-    gfx.setCursor(LIST_TEXT_X, top + 54);
-    gfx.print(buf);
-
+    // The progress line, as at the bottom of a book's pages: a thin track,
+    // and a thicker part for how far through.
     uint32_t pct = readingProgressPercent(index);
-    int16_t barY = top + 72;
-    gfx.drawRect(LIST_TEXT_X, barY, LIST_BAR_W, LIST_BAR_H, INK);
-    int16_t filled = (int16_t)((LIST_BAR_W - 2) * pct / 100);
-    if (filled > 0) gfx.fillRect(LIST_TEXT_X + 1, barY + 1, filled, LIST_BAR_H - 2, INK);
+    int16_t barY = top + LIST_BAR_DY;
+    gfx.drawFastHLine(LIST_TEXT_X, barY, LIST_BAR_W, INK);
+    int16_t done = (int16_t)(LIST_BAR_W * pct / 100);
+    if (done > 0) gfx.fillRect(LIST_TEXT_X, barY - 1, done, 3, INK);
 
-    // Right-aligned at x = SCREEN_W - MARGIN_X: measure, don't guess a fixed
-    // offset, since "0%" and "100%" are different widths.
+    // The percentage, right-aligned at x = SCREEN_W - MARGIN_X and centred
+    // on the line: measured, since "0%" and "100%" are different widths.
     char label[8];
     snprintf(label, sizeof(label), "%u%%", (unsigned)pct);
-    gfx.setFont(&FreeSerif9pt7b);
+    gfx.setFont(&FreeSerif12pt7b);
     int16_t x1, y1;
     uint16_t w, h;
     gfx.getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-    gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, barY + LIST_BAR_H);
+    gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, baselineCentredOn(FreeSerif12pt7b, barY));
     gfx.print(label);
   }
 }
@@ -235,9 +249,9 @@ void libraryShow(bool fullRefresh) {
   drawHeader(gfx);
   if (catalogCount() == 0) {
     gfx.setTextColor(INK);
-    drawCentredText(gfx, "No books yet", &FreeSerifBold9pt7b, 0, SCREEN_W, SCREEN_H / 2 - 12);
-    drawCentredText(gfx, "Add .epub files to the /books folder", &FreeSerif9pt7b, 0, SCREEN_W,
-                    SCREEN_H / 2 + 14);
+    drawCentredText(gfx, "No books yet", &FreeSerifBold12pt7b, 0, SCREEN_W, SCREEN_H / 2 - 14);
+    drawCentredText(gfx, "Add .epub files to the /books folder", &FreeSerif12pt7b, 0, SCREEN_W,
+                    SCREEN_H / 2 + 18);
   } else if (view == LIB_VIEW_GRID) {
     drawGrid(gfx);
   } else {

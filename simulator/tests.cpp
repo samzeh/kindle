@@ -564,9 +564,9 @@ static void testListRowPercentRightAligned() {
 
   GFXcanvas1 &gfx = appCanvas();
   // Book 0 is list row 0: y 50-167 (LIST_TOP=50, LIST_ROW_H=118). Scanning
-  // x >= 400 stays clear of the progress bar (which ends at x = 392) and of
-  // the row's bottom divider line (y = 167), so only the percentage label's
-  // own pixels can be found here.
+  // x >= 400 stays clear of the progress line (which ends at x = 392) and
+  // of the fixture book 0's short title, so only the percentage label's own
+  // pixels can be found here.
   int16_t maxInkX = -1;
   for (int16_t y = 50; y <= 165; y++) {
     for (int16_t x = 400; x < 480; x++) {
