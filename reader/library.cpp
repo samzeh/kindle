@@ -3,6 +3,7 @@
 #include <Fonts/FreeSerif9pt7b.h>
 #include <Fonts/FreeSerifBold9pt7b.h>
 #include <stdio.h>  // snprintf, for the footer and list progress labels
+#include <string.h>
 
 #include "catalog.h"
 #include "cover.h"
@@ -21,11 +22,24 @@ static const int16_t HEADER_H = 48;
 static const int16_t BODY_BOTTOM = 760;
 static const int16_t TOGGLE_X = 384;  // header, x >= this toggles the view
 
-// Grid: two columns of COVER_W with a 24px gutter, flush to the text margins.
-static const int16_t GRID_PER_PAGE = 4;
-static const int16_t GRID_COL_X[2] = { 24, 252 };
-static const int16_t GRID_ROW_Y[2] = { 54, 408 };
-static const int16_t GRID_CELL_H = 350;  // cover 306 + gap 6 + title 20 + author 18
+// Grid: three columns of COVER_W covers, spread across the text margins,
+// three rows deep. Each cell is the cover and up to two lines of title,
+// kept within the cover's width.
+static const int16_t GRID_COLS = 3, GRID_ROWS = 3;
+static const int16_t GRID_PER_PAGE = GRID_COLS * GRID_ROWS;
+static const int16_t GRID_GAP_X = (SCREEN_W - 2 * MARGIN_X - GRID_COLS * COVER_W) / (GRID_COLS - 1);  // 36
+static const int16_t GRID_TOP = 56;
+static const int16_t GRID_CAPTION_H = 40;  // two lines of 9pt below the cover
+static const int16_t GRID_CELL_H = COVER_H + GRID_CAPTION_H;  // 220
+static const int16_t GRID_ROW_PITCH = GRID_CELL_H + 8;
+
+static int16_t gridColX(int16_t col) {
+  return MARGIN_X + col * (COVER_W + GRID_GAP_X);
+}
+
+static int16_t gridRowY(int16_t row) {
+  return GRID_TOP + row * GRID_ROW_PITCH;
+}
 
 // List: six rows, thumbnail then title, author and a progress bar.
 static const int16_t LIST_PER_PAGE = 6;
@@ -48,11 +62,11 @@ uint8_t libraryPageCount(uint8_t v) {
 }
 
 static LibraryHit gridHitTest(int16_t x, int16_t y, uint8_t p) {
-  for (uint8_t row = 0; row < 2; row++) {
-    if (y < GRID_ROW_Y[row] || y >= GRID_ROW_Y[row] + GRID_CELL_H) continue;
-    for (uint8_t col = 0; col < 2; col++) {
-      if (x < GRID_COL_X[col] || x >= GRID_COL_X[col] + COVER_W) continue;
-      uint16_t index = (uint16_t)(p * GRID_PER_PAGE + row * 2 + col);
+  for (int16_t row = 0; row < GRID_ROWS; row++) {
+    if (y < gridRowY(row) || y >= gridRowY(row) + GRID_CELL_H) continue;
+    for (int16_t col = 0; col < GRID_COLS; col++) {
+      if (x < gridColX(col) || x >= gridColX(col) + COVER_W) continue;
+      uint16_t index = (uint16_t)(p * GRID_PER_PAGE + row * GRID_COLS + col);
       if (index >= catalogCount()) return { LIB_NONE, 0 };
       return { LIB_OPEN_BOOK, index };
     }
@@ -111,27 +125,54 @@ static void drawFooter(Adafruit_GFX &gfx) {
   }
 }
 
+// Draws text centred in a box `w` wide, on at most two lines: as many whole
+// words as fit on the first, the rest on the second, shortened with "..." if
+// it is still too long. Nothing is drawn outside the box.
+static void drawCentredTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
+                                int16_t x, int16_t w, int16_t baseline, int16_t lineGap) {
+  char line[64];
+  size_t fit = 0, end = 0;
+  gfx.setFont(font);
+  while (text[end]) {
+    size_t next = end;
+    while (text[next] == ' ') next++;
+    while (text[next] && text[next] != ' ') next++;
+    if (next >= sizeof(line)) break;
+    memcpy(line, text, next);
+    line[next] = '\0';
+    int16_t x1, y1;
+    uint16_t lw, lh;
+    gfx.getTextBounds(line, 0, 0, &x1, &y1, &lw, &lh);
+    if (lw > w) break;
+    fit = end = next;
+  }
+  if (fit == 0) {  // not even the first word fits: shorten it on one line
+    drawCentredText(gfx, text, font, x, w, baseline);
+    return;
+  }
+  memcpy(line, text, fit);
+  line[fit] = '\0';
+  drawCentredText(gfx, line, font, x, w, baseline);
+  const char *rest = text + fit;
+  while (*rest == ' ') rest++;
+  if (*rest) drawCentredText(gfx, rest, font, x, w, baseline + lineGap);
+}
+
 static void drawGrid(Adafruit_GFX &gfx) {
-  for (uint8_t cell = 0; cell < GRID_PER_PAGE; cell++) {
+  for (int16_t cell = 0; cell < GRID_PER_PAGE; cell++) {
     uint16_t index = (uint16_t)(page * GRID_PER_PAGE + cell);
     if (index >= catalogCount()) break;
     const BookInfo &book = catalogBook(index);
-    int16_t x = GRID_COL_X[cell % 2];
-    int16_t y = GRID_ROW_Y[cell / 2];
+    int16_t x = gridColX(cell % GRID_COLS);
+    int16_t y = gridRowY(cell / GRID_COLS);
     drawCover(gfx, book, x, y, COVER_W, COVER_H);
-    // Only caption books with real cover art: without it, drawCover's own
-    // typographic placeholder already states the title and author once,
-    // inside the frame, so a caption here would say it twice.
-    if (book.hasCover) {
-      gfx.setTextColor(INK);
-      drawCentredText(gfx, book.title, &FreeSerifBold9pt7b, x, COVER_W, y + COVER_H + 20);
-      drawCentredText(gfx, book.author, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 38);
-    }
+    gfx.setTextColor(INK);
+    drawCentredTwoLines(gfx, book.title, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 16, 18);
   }
 }
 
 // The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so for
-// a book without cover art drawCover renders it as a frame only (no
+// a book without cover art drawCover renders it as a grey block only (no
 // placeholder title/author). So,
 // unlike the grid, the row's title/author/progress are drawn here for every
 // book regardless of cover art -- they are the only place that text appears.

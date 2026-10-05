@@ -87,14 +87,14 @@ static void testCatalogScan() {
 
 static void testCoverScaling() {
   // At native size, destination and source indices agree.
-  CHECK_EQ(coverSrcIndex(0, COVER_W, COVER_W), 0);
-  CHECK_EQ(coverSrcIndex(203, COVER_W, COVER_W), 203);
+  CHECK_EQ(coverSrcIndex(0, 204, 204), 0);
+  CHECK_EQ(coverSrcIndex(203, 204, 204), 203);
 
-  // Downscaled to a thumbnail, indices stay inside the source.
-  CHECK_EQ(coverSrcIndex(0, 72, COVER_W), 0);
-  CHECK_EQ(coverSrcIndex(71, 72, COVER_W), 201);
-  CHECK_EQ(coverSrcIndex(0, 108, COVER_H), 0);
-  CHECK_EQ(coverSrcIndex(107, 108, COVER_H), 303);
+  // Downscaled, indices stay inside the source.
+  CHECK_EQ(coverSrcIndex(0, 72, 204), 0);
+  CHECK_EQ(coverSrcIndex(71, 72, 204), 201);
+  CHECK_EQ(coverSrcIndex(0, 108, 306), 0);
+  CHECK_EQ(coverSrcIndex(107, 108, 306), 303);
 
   // Never reads past the end, at any destination size.
   for (int16_t size = 1; size <= COVER_W; size++) {
@@ -131,7 +131,7 @@ static void testTruncateToWidth() {
 }
 
 static void testLibraryGridHitTest() {
-  // Four books per page in grid view.
+  // Nine books per page in grid view: three across, three down.
   CHECK_EQ(libraryPageCount(LIB_VIEW_GRID), 1);  // catalogCount() == 4
 
   // Header, right side: toggles the view.
@@ -139,40 +139,38 @@ static void testLibraryGridHitTest() {
   // Header, left side: nothing.
   CHECK_EQ(libraryHitTest(100, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
-  // The four cover cells, sampled at their centres.
-  LibraryHit topLeft = libraryHitTest(126, 200, 0, LIB_VIEW_GRID);
-  CHECK_EQ(topLeft.action, LIB_OPEN_BOOK);
-  CHECK_EQ(topLeft.book, 0);
+  // The cells, sampled at their covers' centres. Columns start at x = 24,
+  // 180 and 336 (120 wide, 36 apart); rows at y = 56 and 284 (220 tall).
+  const int16_t colMid[3] = { 84, 240, 396 };
+  for (int16_t col = 0; col < 3; col++) {
+    LibraryHit hit = libraryHitTest(colMid[col], 150, 0, LIB_VIEW_GRID);
+    CHECK_EQ(hit.action, LIB_OPEN_BOOK);
+    CHECK_EQ(hit.book, col);
+  }
+  LibraryHit secondRow = libraryHitTest(84, 380, 0, LIB_VIEW_GRID);
+  CHECK_EQ(secondRow.action, LIB_OPEN_BOOK);
+  CHECK_EQ(secondRow.book, 3);
+  // The next cell would be book 4, past the shelf.
+  CHECK_EQ(libraryHitTest(240, 380, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
-  LibraryHit topRight = libraryHitTest(354, 200, 0, LIB_VIEW_GRID);
-  CHECK_EQ(topRight.action, LIB_OPEN_BOOK);
-  CHECK_EQ(topRight.book, 1);
-
-  LibraryHit bottomLeft = libraryHitTest(126, 550, 0, LIB_VIEW_GRID);
-  CHECK_EQ(bottomLeft.action, LIB_OPEN_BOOK);
-  CHECK_EQ(bottomLeft.book, 2);
-
-  LibraryHit bottomRight = libraryHitTest(354, 550, 0, LIB_VIEW_GRID);
-  CHECK_EQ(bottomRight.action, LIB_OPEN_BOOK);
-  CHECK_EQ(bottomRight.book, 3);
-
-  // The gutter between the columns opens nothing.
-  CHECK_EQ(libraryHitTest(240, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  // Left of the first column, inside the margin, opens nothing.
-  CHECK_EQ(libraryHitTest(10, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  // The gaps between columns open nothing; nor does the left margin.
+  CHECK_EQ(libraryHitTest(160, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(10, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
   // Cell and header boundaries, each pair "last pixel inside" then "first
-  // pixel outside".
-  CHECK_EQ(libraryHitTest(227, 200, 0, LIB_VIEW_GRID).book, 0);           // col 0 right edge
-  CHECK_EQ(libraryHitTest(228, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  CHECK_EQ(libraryHitTest(251, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);  // col 1 left edge
-  CHECK_EQ(libraryHitTest(252, 200, 0, LIB_VIEW_GRID).book, 1);
-  CHECK_EQ(libraryHitTest(455, 200, 0, LIB_VIEW_GRID).book, 1);           // col 1 right edge
-  CHECK_EQ(libraryHitTest(456, 200, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  CHECK_EQ(libraryHitTest(126, 403, 0, LIB_VIEW_GRID).book, 0);           // row 0 bottom edge
-  CHECK_EQ(libraryHitTest(126, 404, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  CHECK_EQ(libraryHitTest(126, 407, 0, LIB_VIEW_GRID).action, LIB_NONE);  // row 1 top edge
-  CHECK_EQ(libraryHitTest(126, 408, 0, LIB_VIEW_GRID).book, 2);
+  // pixel outside". A cell is its cover plus the title below it.
+  CHECK_EQ(libraryHitTest(143, 150, 0, LIB_VIEW_GRID).book, 0);           // col 0 right edge
+  CHECK_EQ(libraryHitTest(144, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(179, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);  // col 1 left edge
+  CHECK_EQ(libraryHitTest(180, 150, 0, LIB_VIEW_GRID).book, 1);
+  CHECK_EQ(libraryHitTest(455, 150, 0, LIB_VIEW_GRID).book, 2);           // col 2 right edge
+  CHECK_EQ(libraryHitTest(456, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(84, 55, 0, LIB_VIEW_GRID).action, LIB_NONE);    // row 0 top edge
+  CHECK_EQ(libraryHitTest(84, 56, 0, LIB_VIEW_GRID).book, 0);
+  CHECK_EQ(libraryHitTest(84, 275, 0, LIB_VIEW_GRID).book, 0);            // row 0 bottom edge
+  CHECK_EQ(libraryHitTest(84, 276, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(84, 283, 0, LIB_VIEW_GRID).action, LIB_NONE);   // row 1 top edge
+  CHECK_EQ(libraryHitTest(84, 284, 0, LIB_VIEW_GRID).book, 3);
   CHECK_EQ(libraryHitTest(383, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);   // toggle edge
   CHECK_EQ(libraryHitTest(384, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
 
@@ -276,8 +274,8 @@ static void testDrawCoverPixels() {
   static uint8_t grid[COVER_GRID_BYTES], thumb[COVER_THUMB_BYTES];
   MemReader jpeg(HALF_BLACK_JPEG, sizeof(HALF_BLACK_JPEG));
   CHECK(coverRender(jpeg, grid, thumb));
-  CHECK(bitSet(grid, COVER_W, 100, 60));
-  CHECK(!bitSet(grid, COVER_W, 100, 250));
+  CHECK(bitSet(grid, COVER_W, COVER_W / 2, COVER_H / 5));
+  CHECK(!bitSet(grid, COVER_W, COVER_W / 2, COVER_H * 4 / 5));
   CHECK(bitSet(thumb, THUMB_W, THUMB_W / 2, 20));
   CHECK(!bitSet(thumb, THUMB_W, THUMB_W / 2, 90));
 
@@ -286,7 +284,8 @@ static void testDrawCoverPixels() {
   MemReader bad(notJpeg, sizeof(notJpeg));
   CHECK(!coverRender(bad, grid, thumb));
 
-  // A book without a cover draws a frame rather than nothing.
+  // A book without a cover draws a framed light grey block (one pixel in
+  // four ink inside the frame) rather than nothing.
   BookInfo noArt = {};
   strcpy(noArt.title, "Title");
   strcpy(noArt.author, "Author");
@@ -295,38 +294,54 @@ static void testDrawCoverPixels() {
   drawCover(fb, noArt, 0, 0, COVER_W, COVER_H);
   CHECK(!fb.getPixel(0, 0));                       // frame corner is ink
   CHECK(!fb.getPixel(COVER_W - 1, COVER_H - 1));   // opposite corner too
+  int ink = 0, inside = 0;
+  for (int16_t y = 2; y < COVER_H - 2; y++)
+    for (int16_t x = 2; x < COVER_W - 2; x++, inside++) ink += !fb.getPixel(x, y);
+  CHECK(ink * 4 > inside * 9 / 10 && ink * 4 < inside * 11 / 10);  // about a quarter
 }
 
-// drawCover's typographic placeholder writes title/author text inside the
-// frame only when the box clears the legibility floor. Below it (e.g. the
-// list view's 72px thumbnail), the caller draws the caption elsewhere, so
-// drawCover must draw the frame alone or the text is stated twice.
+// Whether the box has a white band: several entirely white rows in a row
+// inside the frame (the grey pattern alone only ever has one white row at a
+// time). That band is what the placeholder's text sits on.
+static bool hasWhiteBand(GFXcanvas1 &c, int16_t w, int16_t h) {
+  int16_t run = 0;
+  for (int16_t y = 1; y < h - 1; y++) {
+    bool white = true;
+    for (int16_t x = 1; x < w - 1 && white; x++) white = c.getPixel(x, y);
+    run = white ? run + 1 : 0;
+    if (run >= 3) return true;
+  }
+  return false;
+}
+
+// drawCover's typographic placeholder writes title/author text (on a white
+// band) only when the box clears the legibility floor. Below it, as for all
+// of the library's covers, the caller draws the caption elsewhere, so
+// drawCover must draw the grey block alone or the text is stated twice.
 static void testDrawCoverPlaceholderLegibility() {
   BookInfo noArt = {};
   strcpy(noArt.title, "Title");
   strcpy(noArt.author, "Author");
 
-  GFXcanvas1 full(COVER_W, COVER_H);
+  const int16_t bigW = 204, bigH = 306;  // a box above the legibility floor
+  CHECK(bigW >= COVER_TEXT_MIN_W);
+  GFXcanvas1 full(bigW, bigH);
   full.fillScreen(0xFFFF);
-  drawCover(full, noArt, 0, 0, COVER_W, COVER_H);
-  // At full width (well above the floor), some interior pixel is ink: the
-  // placeholder text is drawn.
-  bool fullHasInteriorInk = false;
-  for (int16_t y = 4; y < COVER_H - 4 && !fullHasInteriorInk; y++)
-    for (int16_t x = 4; x < COVER_W - 4; x++)
-      if (!full.getPixel(x, y)) { fullHasInteriorInk = true; break; }
-  CHECK(fullHasInteriorInk);
+  drawCover(full, noArt, 0, 0, bigW, bigH);
+  CHECK(hasWhiteBand(full, bigW, bigH));  // the band behind the text
+  bool textInk = false;                   // ...and the text on it
+  for (int16_t y = bigH / 2 - 20; y < bigH / 2 + 20 && !textInk; y++)
+    for (int16_t x = 10; x < bigW - 10; x++)
+      if (!full.getPixel(x, y)) { textInk = true; break; }
+  CHECK(textInk);
+  CHECK(COVER_W < COVER_TEXT_MIN_W);  // the library's covers are all captioned
 
   GFXcanvas1 thumb(THUMB_W, THUMB_H);
   thumb.fillScreen(0xFFFF);
   drawCover(thumb, noArt, 0, 0, THUMB_W, THUMB_H);
   CHECK(THUMB_W < COVER_TEXT_MIN_W);  // this test only means something if so
-  // Below the floor: frame only, no interior ink.
-  bool thumbHasInteriorInk = false;
-  for (int16_t y = 1; y < THUMB_H - 1 && !thumbHasInteriorInk; y++)
-    for (int16_t x = 1; x < THUMB_W - 1; x++)
-      if (!thumb.getPixel(x, y)) { thumbHasInteriorInk = true; break; }
-  CHECK(!thumbHasInteriorInk);
+  // Below the floor: the grey block alone, with no band and no text.
+  CHECK(!hasWhiteBand(thumb, THUMB_W, THUMB_H));
   // The frame itself is still drawn.
   CHECK(!thumb.getPixel(0, 0));
   CHECK(!thumb.getPixel(THUMB_W - 1, THUMB_H - 1));
@@ -528,7 +543,7 @@ static void testChapterTitles() {
 // state-mutating tests (drives readingOpenBook/readingTurnPage, which
 // draw through the shared appCanvas() singleton and mutate reading.cpp's
 // statics), and restores `view` to grid afterward so it does not affect
-// testLibraryGridCaptionMatchesCoverArt, which must stay last.
+// testLibraryGridCaptionsEveryBook, which must stay last.
 static void testListRowPercentRightAligned() {
   hostStoreReset();
   libraryTap(400, 20);  // header toggle: grid -> list
@@ -567,21 +582,24 @@ static void testListRowPercentRightAligned() {
   libraryTap(400, 20);  // header toggle: list -> grid, restore state
 }
 
-// A book with cover art is captioned with its title and author below the
-// cover; a book without art is not, since drawCover's placeholder already
-// states them inside the frame and a caption would say it twice.
-// (Coordinates match library.cpp's private grid geometry: the top-left cell
-// starts at (24, 54); it is the one cell that stays inside the unrotated test
-// canvas without calling appBegin().)
-static void testLibraryGridCaptionMatchesCoverArt() {
+// Every book in the grid is captioned with its title below its cover,
+// whether or not it has cover art (the grey placeholder at this size has no
+// text of its own), and the caption stays within the cover's width.
+// (Coordinates match library.cpp's grid geometry: the top-left cell starts
+// at (24, 56); it is inside the unrotated test canvas without calling
+// appBegin().)
+static void testLibraryGridCaptionsEveryBook() {
   libraryShow(false);
   GFXcanvas1 &gfx = appCanvas();
-  const int16_t cellX = 24, cellY = 54, cellH = 350;
-  bool inkBelowCover = false;
-  for (int16_t y = cellY + COVER_H + 1; y < cellY + cellH && !inkBelowCover; y++)
-    for (int16_t x = cellX; x < cellX + COVER_W; x++)
-      if (!gfx.getPixel(x, y)) { inkBelowCover = true; break; }
-  CHECK(inkBelowCover == catalogBook(0).hasCover);
+  const int16_t cellX = 24, cellY = 56, captionH = 40;
+  bool inkBelowCover = false, inkOutside = false;
+  for (int16_t y = cellY + COVER_H + 1; y < cellY + COVER_H + captionH; y++) {
+    for (int16_t x = cellX; x < cellX + COVER_W; x++) inkBelowCover |= !gfx.getPixel(x, y);
+    for (int16_t x = 0; x < cellX; x++) inkOutside |= !gfx.getPixel(x, y);
+    for (int16_t x = cellX + COVER_W; x < cellX + COVER_W + 36; x++) inkOutside |= !gfx.getPixel(x, y);
+  }
+  CHECK(inkBelowCover);
+  CHECK(!inkOutside);
 }
 
 // THE ORDER OF THE SECOND GROUP IS A CONSTRAINT, NOT A STYLE CHOICE.
@@ -596,7 +614,7 @@ static void testLibraryGridCaptionMatchesCoverArt() {
 // one inherits whatever the last one left behind. The dependencies that exist
 // today:
 //
-//   - testLibraryGridCaptionMatchesCoverArt reads the shared canvas directly and
+//   - testLibraryGridCaptionsEveryBook reads the shared canvas directly and
 //     needs the view to be grid, which is also the initial value. It must not
 //     run after anything that leaves the view on list.
 //   - testListRowPercentRightAligned toggles the view to list and back, so it
@@ -635,7 +653,7 @@ int main() {
   testChapterTitles();
   testCoverAndChapterPages();
   testListRowPercentRightAligned();
-  testLibraryGridCaptionMatchesCoverArt();
+  testLibraryGridCaptionsEveryBook();
 
   runEpubTests();  // EPUB reading (test_epub.cpp): independent of the above
   if (failures) {
