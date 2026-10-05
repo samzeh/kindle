@@ -3,6 +3,7 @@
 #include <Fonts/FreeSerif9pt7b.h>
 #include <Fonts/FreeSerif12pt7b.h>
 #include <Fonts/FreeSerifBold12pt7b.h>
+#include <Fonts/FreeSerifBold18pt7b.h>
 #include <stdio.h>  // snprintf, for the footer and list progress labels
 #include <string.h>
 
@@ -23,7 +24,7 @@ static const int16_t SCREEN_H = 800;
 static const int16_t MARGIN_X = 24;
 // The header's text starts 30px down, as a book's pages do (layout.cpp's
 // MARGIN_TOP), so the two screens share a top edge.
-static const int16_t HEADER_MID = 38;
+static const int16_t HEADER_MID = 42;
 static const int16_t HEADER_H = 60;
 static const int16_t BODY_BOTTOM = 760;
 static const int16_t TOGGLE_X = 384;  // header, x >= this toggles the view
@@ -35,15 +36,15 @@ static const int16_t FOOTER_MID = SCREEN_H - 20;
 static const int16_t GRID_COLS = 3, GRID_ROWS = 3;
 static const int16_t GRID_PER_PAGE = GRID_COLS * GRID_ROWS;
 static const int16_t GRID_GAP_X = (SCREEN_W - 2 * MARGIN_X - GRID_COLS * COVER_W) / (GRID_COLS - 1);  // 36
-static const int16_t GRID_TOP = 72;
+static const int16_t GRID_TOP = 84;
 static const int16_t GRID_CAPTION_H = 40;  // two lines of 9pt below the cover
 static const int16_t GRID_CELL_H = COVER_H + GRID_CAPTION_H;  // 220
 static const int16_t GRID_ROW_PITCH = GRID_CELL_H + 8;
 
 // The ribbon on each grid cover: a black bookmark hanging from the cover's
 // top edge near its right side, with how far through the book is in white.
-static const int16_t RIBBON_W = 38;
-static const int16_t RIBBON_H = 22;      // the square part, holding the text
+static const int16_t RIBBON_W = 30;
+static const int16_t RIBBON_H = 32;      // the straight part, holding the text
 static const int16_t RIBBON_NOTCH = 9;   // the V cut into its tail
 static const int16_t RIBBON_INSET = 8;   // from the cover's right edge
 
@@ -55,14 +56,15 @@ static int16_t gridRowY(int16_t row) {
   return GRID_TOP + row * GRID_ROW_PITCH;
 }
 
-// List: six rows, each a thumbnail, then the title (up to two lines) and a
-// progress line like the one at the bottom of a book's pages.
+// List: six rows, each a thumbnail, then the title (up to two lines), the
+// author and an outlined progress bar.
 static const int16_t LIST_PER_PAGE = 6;
-static const int16_t LIST_TOP = 66;
+static const int16_t LIST_TOP = 76;
 static const int16_t LIST_ROW_H = 114;
 static const int16_t LIST_TEXT_X = 112;   // MARGIN_X + THUMB_W + 16
 static const int16_t LIST_BAR_W = 280;
-static const int16_t LIST_BAR_DY = 90;    // the progress line, from the row's top
+static const int16_t LIST_BAR_H = 8;
+static const int16_t LIST_BAR_DY = 86;    // the bar's top, from the row's top
 // Text column right edge is the page's right margin, matching MARGIN_X.
 static const int16_t LIST_TEXT_MAX_W = SCREEN_W - MARGIN_X - LIST_TEXT_X;  // 344
 
@@ -121,8 +123,8 @@ static int16_t baselineCentredOn(const GFXfont &font, int16_t y) {
 // "Library", and an icon for the view a tap would switch to.
 static void drawHeader(Adafruit_GFX &gfx) {
   gfx.setTextColor(INK);
-  gfx.setFont(&FreeSerifBold12pt7b);
-  gfx.setCursor(MARGIN_X, baselineCentredOn(FreeSerifBold12pt7b, HEADER_MID));
+  gfx.setFont(&FreeSerifBold18pt7b);
+  gfx.setCursor(MARGIN_X, baselineCentredOn(FreeSerifBold18pt7b, HEADER_MID));
   gfx.print("Library");
   int16_t iconX = SCREEN_W - MARGIN_X - 10;
   if (view == LIB_VIEW_GRID) iconList(gfx, iconX, HEADER_MID);
@@ -144,8 +146,9 @@ static void drawFooter(Adafruit_GFX &gfx) {
 // Draws text on at most two lines within a box `w` wide starting at x:
 // as many whole words as fit on the first, the rest on the second,
 // shortened with "..." if it is still too long. Nothing is drawn outside
-// the box. Centred in the box, or left-aligned at x.
-static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *font, int16_t x,
+// the box. Centred in the box, or left-aligned at x. Returns how many lines
+// it drew.
+static int16_t drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *font, int16_t x,
                          int16_t w, int16_t baseline, int16_t lineGap, bool centred) {
   char line[64];
   size_t fit = 0, end = 0;
@@ -172,7 +175,8 @@ static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *fon
   }
   char buf[64];
   const char *lines[2] = { fit > 0 ? line : rest, fit > 0 ? rest : "" };
-  for (int16_t i = 0; i < 2 && *lines[i]; i++) {
+  int16_t i = 0;
+  for (; i < 2 && *lines[i]; i++) {
     int16_t y = baseline + i * lineGap;
     if (centred) {
       drawCentredText(gfx, lines[i], font, x, w, y);
@@ -182,6 +186,7 @@ static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *fon
       gfx.print(buf);
     }
   }
+  return i;
 }
 
 // The bookmark ribbon at (x, y), its top-left corner, showing `percent`.
@@ -197,8 +202,9 @@ static void drawRibbon(Adafruit_GFX &gfx, int16_t x, int16_t y, uint32_t percent
   gfx.drawFastVLine(right + 1, y, bottom - y + 1, PAPER);
   gfx.drawLine(x, bottom + 1, mid, cut + 1, PAPER);
   gfx.drawLine(mid, cut + 1, right, bottom + 1, PAPER);
+  // "100%" is too wide for the ribbon, so a finished book shows "100".
   char label[8];
-  snprintf(label, sizeof(label), "%u%%", (unsigned)percent);
+  snprintf(label, sizeof(label), percent >= 100 ? "%u" : "%u%%", (unsigned)percent);
   gfx.setTextColor(PAPER);
   drawCentredText(gfx, label, &FreeSerif8pt7b, x, RIBBON_W,
                   baselineCentredOn(FreeSerif8pt7b, y + RIBBON_H / 2));
@@ -221,8 +227,8 @@ static void drawGrid(Adafruit_GFX &gfx) {
 
 // The list thumbnail is THUMB_W (72px) wide, below COVER_TEXT_MIN_W, so for
 // a book without cover art drawCover renders it as a grey block only (no
-// placeholder title). The row's title, drawn here for every book, is the
-// only place it appears.
+// placeholder title). The row's title and author, drawn here for every
+// book, are the only place they appear.
 static void drawList(Adafruit_GFX &gfx) {
   for (uint8_t row = 0; row < LIST_PER_PAGE; row++) {
     uint16_t index = (uint16_t)(page * LIST_PER_PAGE + row);
@@ -233,26 +239,30 @@ static void drawList(Adafruit_GFX &gfx) {
     drawCover(gfx, book, MARGIN_X, top + 5, THUMB_W, THUMB_H);
 
     gfx.setTextColor(INK);
-    drawTwoLines(gfx, book.title, &FreeSerifBold12pt7b, LIST_TEXT_X, LIST_TEXT_MAX_W, top + 30, 26,
-                 false);
+    int16_t titleLines = drawTwoLines(gfx, book.title, &FreeSerifBold12pt7b, LIST_TEXT_X,
+                                      LIST_TEXT_MAX_W, top + 26, 24, false);
+    // The author, smaller and not bold, just under the title's last line.
+    char author[48];
+    truncateToWidth(gfx, book.author, &FreeSerif9pt7b, LIST_TEXT_MAX_W, author, sizeof(author));
+    gfx.setCursor(LIST_TEXT_X, top + 26 + (titleLines > 1 ? 24 : 0) + 22);
+    gfx.print(author);
 
-    // The progress line, as at the bottom of a book's pages: a thin track,
-    // and a thicker part for how far through.
+    // An outlined bar, filled for how far through.
     uint32_t pct = readingProgressPercent(index);
     int16_t barY = top + LIST_BAR_DY;
-    gfx.drawFastHLine(LIST_TEXT_X, barY, LIST_BAR_W, INK);
-    int16_t done = (int16_t)(LIST_BAR_W * pct / 100);
-    if (done > 0) gfx.fillRect(LIST_TEXT_X, barY - 1, done, 3, INK);
+    gfx.drawRect(LIST_TEXT_X, barY, LIST_BAR_W, LIST_BAR_H, INK);
+    int16_t done = (int16_t)((LIST_BAR_W - 2) * pct / 100);
+    if (done > 0) gfx.fillRect(LIST_TEXT_X + 1, barY + 1, done, LIST_BAR_H - 2, INK);
 
     // The percentage, right-aligned at x = SCREEN_W - MARGIN_X and centred
-    // on the line: measured, since "0%" and "100%" are different widths.
+    // on the bar: measured, since "0%" and "100%" are different widths.
     char label[8];
     snprintf(label, sizeof(label), "%u%%", (unsigned)pct);
     gfx.setFont(&FreeSerif12pt7b);
     int16_t x1, y1;
     uint16_t w, h;
     gfx.getTextBounds(label, 0, 0, &x1, &y1, &w, &h);
-    gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, baselineCentredOn(FreeSerif12pt7b, barY));
+    gfx.setCursor(SCREEN_W - MARGIN_X - (int16_t)w - x1, baselineCentredOn(FreeSerif12pt7b, barY + LIST_BAR_H / 2));
     gfx.print(label);
   }
 }
