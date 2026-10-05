@@ -19,7 +19,6 @@
 #include <Fonts/FreeSerifItalic12pt7b.h>
 #include <Fonts/FreeSerifBold12pt7b.h>
 #include <Fonts/FreeSerifBoldItalic12pt7b.h>
-#include <Fonts/FreeSerif9pt7b.h>
 #include "zip.h"
 
 namespace {
@@ -383,7 +382,7 @@ static void testFileTextMatchesMemText() {
   storageClose(out);
 
   const PageFonts fonts = { &FreeSerif12pt7b, &FreeSerifItalic12pt7b, &FreeSerifBold12pt7b,
-                            &FreeSerifBoldItalic12pt7b, &FreeSerif9pt7b };
+                            &FreeSerifBoldItalic12pt7b };
   GFXcanvas1 canvas(480, 800);
   MemText mem(sink.s.data(), (uint32_t)sink.s.size());
   FileText file(64);

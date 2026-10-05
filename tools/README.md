@@ -17,6 +17,16 @@ it. Needs Pillow (`python3 -m pip install pillow`).
 
     python3 tools/make_fixture_epubs.py
 
+## make_gfx_font.py
+
+Turns a TrueType font into an Adafruit GFX font header, for sizes the
+library does not ship. Matches Adafruit's fontconvert (141 DPI, ASCII, no
+anti-aliasing). Needs Pillow.
+
+    python3 tools/make_gfx_font.py FreeSerif.ttf 8 FreeSerif8pt7b > reader/fonts/FreeSerif8pt7b.h
+
+FreeSerif.ttf is in GNU FreeFont (https://ftp.gnu.org/gnu/freefont/).
+
 ## epub_cover.py (no longer used by the reader)
 
 Extracts a book's cover from its EPUB file, byte for byte, as a C header.

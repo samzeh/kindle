@@ -10,6 +10,7 @@ enum ReadingAction : uint8_t {
   READ_SHOW_CONTROLS,
   READ_HIDE_CONTROLS,
   READ_BACK_TO_LIBRARY,
+  READ_OPEN_SETTINGS,
 };
 
 // What a tap means, given whether the control bar is up. Pure, so it is
@@ -42,4 +43,4 @@ const char *readingChapterTitle();
 
 // Bump when anything changes where pages break (fonts, margins, layout
 // rules), so every book's page count is redone.
-static const uint16_t LAYOUT_VERSION = 1;
+static const uint16_t LAYOUT_VERSION = 7;

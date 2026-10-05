@@ -5,13 +5,13 @@
 #include <Fonts/FreeSerifBold12pt7b.h>
 #include <Fonts/FreeSerifBoldItalic12pt7b.h>
 #include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerifBold9pt7b.h>
 #include <algorithm>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
 
 #include "busy.h"
+#include "fonts/FreeSerif8pt7b.h"
 #include "catalog.h"
 #include "cover.h"
 #include "epd.h"
@@ -25,9 +25,23 @@
 // Set this to N to do a full (flashing) refresh every N turns; 0 = never.
 static const uint8_t FULL_REFRESH_EVERY = 0;
 
+// The controls, shown only after a tap in the middle of the page: a bar
+// across the top (back, chapter name, settings) in the 9pt font, a little
+// smaller than the book's 12pt text, and the page number in a strip along
+// the bottom in 8pt. They are drawn over the page, and each grows to hide
+// whole lines of text rather than cut through one.
 static const int16_t SCREEN_W = 480;
-static const int16_t BAR_H = 64;    // control bar height, drawn over the page top
-static const int16_t BACK_W = 80;   // width of the back arrow's tap target
+static const int16_t SCREEN_H = 800;
+static const int16_t BAR_H = 44;        // top bar height
+static const int16_t BAR_MID = BAR_H / 2;
+static const int16_t ICON_TAP_W = 64;   // tap targets of the back and settings icons
+static const int16_t PAGE_STRIP_H = 30; // bottom strip with the page number
+
+// The progress line, in the bottom margin while reading: a thin track across
+// the text's width, with a thicker part showing how far through the book.
+static const int16_t PROGRESS_X = 24;   // matches the text margins
+static const int16_t PROGRESS_W = SCREEN_W - 2 * PROGRESS_X;
+static const int16_t PROGRESS_Y = SCREEN_H - 12;  // the track's row
 static const uint32_t PAGES_MAGIC = 0x50475331;  // "PGS1"
 
 static const PageFonts fonts = {
@@ -35,7 +49,6 @@ static const PageFonts fonts = {
   &FreeSerifItalic12pt7b,
   &FreeSerifBold12pt7b,
   &FreeSerifBoldItalic12pt7b,
-  &FreeSerif9pt7b,
 };
 
 static FileText text;
@@ -184,7 +197,8 @@ static void saveProgress() {
 
 ReadingAction readingHitTest(int16_t x, int16_t y, bool barUp) {
   if (barUp) {
-    if (y < BAR_H && x < BACK_W) return READ_BACK_TO_LIBRARY;
+    if (y < BAR_H && x < ICON_TAP_W) return READ_BACK_TO_LIBRARY;
+    if (y < BAR_H && x >= SCREEN_W - ICON_TAP_W) return READ_OPEN_SETTINGS;
     return READ_HIDE_CONTROLS;
   }
   if (x < SCREEN_W / 3) return READ_PREV;
@@ -219,39 +233,72 @@ const char *readingChapterTitle() {
   return title;
 }
 
-// Draws the control bar over the top BAR_H pixels of the current page: a
-// back arrow to the library, and the chapter's title (or, before the first
-// chapter, the book's) centred in the rest of the bar (drawCentredText also
-// truncates it, so a long title cannot run under the arrow or off the edge).
-static void drawControlBar(Adafruit_GFX &gfx) {
-  const uint16_t INK = 0x0000, PAPER = 0xFFFF;
-  gfx.fillRect(0, 0, SCREEN_W, BAR_H, PAPER);
-  gfx.drawFastHLine(0, BAR_H - 1, SCREEN_W, INK);
+static const uint16_t INK = 0x0000, PAPER = 0xFFFF;
 
-  // Back arrow: a triangle with a shaft, pointing left.
-  gfx.fillTriangle(24, 32, 38, 22, 38, 42, INK);
-  gfx.drawFastHLine(38, 32, 22, INK);
+// A thin "<" chevron, centred on (cx, cy).
+static void drawChevron(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
+  for (int16_t t = 0; t < 2; t++) {  // 2 px thick
+    gfx.drawLine(cx + 4 + t, cy - 8, cx - 4 + t, cy, INK);
+    gfx.drawLine(cx - 4 + t, cy, cx + 4 + t, cy + 8, INK);
+  }
+}
+
+// A small gear, centred on (cx, cy): a ring with eight teeth.
+static void drawGear(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
+  static const int8_t TEETH[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
+                                      { 0, 1 },  { -1, 1 }, { -1, 0 }, { -1, -1 } };
+  for (const auto &t : TEETH) {
+    int16_t r = t[0] && t[1] ? 6 : 8;  // diagonal teeth reach the same distance
+    gfx.fillRect(cx + t[0] * r - 1, cy + t[1] * r - 1, 3, 3, INK);
+  }
+  gfx.fillCircle(cx, cy, 6, INK);
+  gfx.fillCircle(cx, cy, 3, PAPER);
+}
+
+// The top bar: back chevron, the chapter's title (or, before the first
+// chapter, the book's) in the middle, and the settings gear. drawCentredText
+// truncates the title, so a long one cannot run under the icons.
+static void drawTopBar(Adafruit_GFX &gfx) {
+  gfx.fillRect(0, 0, SCREEN_W, layout->coverDownTo(BAR_H), PAPER);
+  drawChevron(gfx, 30, BAR_MID);
+  drawGear(gfx, SCREEN_W - 30, BAR_MID);
 
   const char *title = readingChapterTitle();
   if (!title[0]) title = catalogBook(currentBook).title;
   gfx.setTextColor(INK);
-  drawCentredText(gfx, title, &FreeSerifBold9pt7b, BACK_W, SCREEN_W - BACK_W, 38);
+  // Baseline placed so a capital letter's middle is on BAR_MID, level with
+  // the middles of the chevron and gear.
+  const GFXglyph &cap = FreeSerif9pt7b.glyph['H' - FreeSerif9pt7b.first];
+  int16_t baseline = BAR_MID - cap.yOffset - (cap.height - 1) / 2;
+  drawCentredText(gfx, title, &FreeSerif9pt7b, ICON_TAP_W, SCREEN_W - 2 * ICON_TAP_W, baseline);
 }
 
-// "Page 12 of 340", centred below the text.
-static void drawFooter(Adafruit_GFX &gfx) {
+static void drawProgressLine(Adafruit_GFX &gfx) {
+  gfx.drawFastHLine(PROGRESS_X, PROGRESS_Y, PROGRESS_W, INK);
+  // Full on the last page.
+  int16_t done = (int16_t)((uint32_t)PROGRESS_W * (currentPage + 1) / pages.size());
+  gfx.fillRect(PROGRESS_X, PROGRESS_Y - 1, done, 3, INK);
+}
+
+// The bottom strip: "Page 12 of 340".
+static void drawPageStrip(Adafruit_GFX &gfx) {
+  int16_t top = layout->coverUpTo(SCREEN_H - PAGE_STRIP_H);
+  gfx.fillRect(0, top, SCREEN_W, SCREEN_H - top, PAPER);
   char label[32];
   snprintf(label, sizeof(label), "Page %u of %u", (unsigned)currentPage + 1, (unsigned)pages.size());
-  gfx.setTextColor(0x0000);
-  drawCentredText(gfx, label, fonts.footer, 0, gfx.width(), layout->footerBaseline());
+  gfx.setTextColor(INK);
+  drawCentredText(gfx, label, &FreeSerif8pt7b, 0, SCREEN_W, SCREEN_H - 18);
 }
 
 void readingShow(bool fullRefresh) {
   if (currentBook == UINT16_MAX || pages.empty()) return;
   unsigned long t0 = millis();
   layout->layoutPage(pageStart(currentPage), true);
-  drawFooter(appCanvas());
-  if (controlsVisible) drawControlBar(appCanvas());
+  drawProgressLine(appCanvas());  // the page strip covers it when the controls are up
+  if (controlsVisible) {
+    drawTopBar(appCanvas());
+    drawPageStrip(appCanvas());
+  }
   appRefresh(fullRefresh);
   Serial.printf("page %u of %u shown in %lu ms (%s)\n", (unsigned)currentPage + 1,
                 (unsigned)pages.size(), millis() - t0, fullRefresh ? "full" : "partial");
@@ -284,6 +331,9 @@ void readingTap(int16_t x, int16_t y) {
       controlsVisible = false;
       saveProgress();
       appGoTo(SCREEN_LIBRARY);
+      break;
+    case READ_OPEN_SETTINGS:
+      Serial.println("reading: settings are not built yet");  // the bar stays up
       break;
     default: break;
   }

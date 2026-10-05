@@ -30,7 +30,6 @@ struct PageFonts {
   const GFXfont *italic;
   const GFXfont *bold;
   const GFXfont *boldItalic;
-  const GFXfont *footer;
 };
 
 class PageLayout {
@@ -38,7 +37,7 @@ public:
   PageLayout(Adafruit_GFX &gfx, TextSource &text, const PageFonts &fonts);
 
   // Lays out one page beginning at `start`, drawing it if `draw` is true
-  // (the page area is cleared first; the footer is left to the caller).
+  // (the page area is cleared first).
   // Returns where the following page begins. With draw = false nothing is
   // touched on the canvas, so this is also how a book is paginated.
   PagePos layoutPage(PagePos start, bool draw);
@@ -47,10 +46,14 @@ public:
     return pos.offset >= _text.length();
   }
 
-  // Where the footer's baseline goes, below the text area.
-  int16_t footerBaseline() const {
-    return _gfx.height() - 20;
-  }
+  // For overlays that must hide whole lines rather than slice through them,
+  // using the lines placed by the most recent layoutPage call:
+  // how far down a band from the top to y must reach to cover every line
+  // that starts above y,
+  int16_t coverDownTo(int16_t y) const;
+  // and how far up a band from y to the bottom must reach to cover every
+  // line that ends below y.
+  int16_t coverUpTo(int16_t y) const;
 
 private:
   struct Word {
@@ -68,4 +71,7 @@ private:
   Adafruit_GFX &_gfx;
   TextSource &_text;
   PageFonts _fonts;
+  static const uint8_t MAX_LINES = 64;
+  int16_t _lineTop[MAX_LINES], _lineBottom[MAX_LINES];
+  uint8_t _lineCount = 0;
 };

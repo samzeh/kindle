@@ -7,8 +7,10 @@ static const uint16_t INK = 0x0000;
 static const uint16_t PAPER = 0xFFFF;
 
 static const int16_t MARGIN_X = 24;
-static const int16_t MARGIN_TOP = 32;
-static const int16_t MARGIN_BOTTOM = 52;  // leaves room for the footer
+// The reading screen's controls are overlays (they hide the lines under them
+// while shown), so the margins need no room for them.
+static const int16_t MARGIN_TOP = 16;
+static const int16_t MARGIN_BOTTOM = 16;
 static const int MAX_WORDS_PER_LINE = 48;
 static const int16_t MAX_JUSTIFY_STRETCH = 2;  // extra gap allowed, in spaces
 
@@ -79,6 +81,7 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
   bool heading = start.inHeading;  // for a paragraph continued from the last page
   int16_t y = MARGIN_TOP;          // top of the next line
   bool pageEmpty = true;
+  _lineCount = 0;
 
   while (pos < len) {
     char c = _text.at(pos);
@@ -156,6 +159,11 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
 
       italic = lineItalic;
       pos = p;
+      if (_lineCount < MAX_LINES) {
+        _lineTop[_lineCount] = y;
+        _lineBottom[_lineCount] = y + lineHeight;
+        _lineCount++;
+      }
       y += lineHeight;
       firstLine = false;
       pageEmpty = false;
@@ -167,4 +175,18 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
   }
 
   return { pos, italic, heading && pos < len && !(pos == 0 || _text.at(pos - 1) == '\n') };
+}
+
+int16_t PageLayout::coverDownTo(int16_t y) const {
+  int16_t bottom = y;
+  for (uint8_t i = 0; i < _lineCount; i++)
+    if (_lineTop[i] < y && _lineBottom[i] > bottom) bottom = _lineBottom[i];
+  return bottom;
+}
+
+int16_t PageLayout::coverUpTo(int16_t y) const {
+  int16_t top = y;
+  for (uint8_t i = 0; i < _lineCount; i++)
+    if (_lineBottom[i] > y && _lineTop[i] < top) top = _lineTop[i];
+  return top;
 }

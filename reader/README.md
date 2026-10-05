@@ -4,9 +4,11 @@ An ESP32 e-reader for the Good Display GDEQ0426T82 4.26" e-paper panel
 (800 × 480) with an FT6336 touch panel. It reads books from `.epub` files: it
 opens on a library of books shown with their covers, in either a cover grid
 or a list with reading progress. Tap a book to read it; in a book, tap the
-left third for the previous page, the right third for the next, and the
-middle for a bar showing the current chapter and a way back to the library.
-Pages are numbered across the whole book ("Page 42 of 856").
+left third for the previous page and the right third for the next. While
+reading, the screen shows only the text; tap the middle for the controls: a
+bar with a back chevron, the current chapter's name and a settings gear (no
+settings screen yet), and the page number, counted across the whole book
+("Page 42 of 856").
 
 On the device, books are `.epub` files in a `books` folder on a microSD
 card (FAT32). In the simulator they are `.epub` files in `simulator/books/`.
@@ -58,7 +60,7 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 | `app.h` / `app.cpp` | The screen router: owns the frame buffer, finds the books at startup, normalises taps, hands them to whichever screen is showing, and sends screens to the display (`appRefresh`). |
 | `screens.h` | The list of screens, plus `appGoTo()`, `appRefresh()` and the shared canvas. Adding a screen starts here. |
 | `library.h` / `library.cpp` | The library (home) screen: the cover grid, the list view with progress, and the toggle between them. |
-| `reading.h` / `reading.cpp` | The reading screen: opens and prepares books, counts pages, "Page X of Y", the control bar with the chapter title, and what a tap does. |
+| `reading.h` / `reading.cpp` | The reading screen: opens and prepares books, counts pages, the controls (back, chapter name, settings, "Page X of Y"), and what a tap does. |
 | `busy.h` / `busy.cpp` | The "Preparing book..." / "Adding book" progress screen. |
 | `catalog.h` / `catalog.cpp` | The books: finds `.epub` files in `/books`, imports each one's title, author and cover, converts its text when first opened, and manages the cache. |
 | `epub.h` / `epub.cpp` | Reads an EPUB's structure: title, author, cover, reading order and table of contents (EPUB 2 and 3). |
@@ -78,6 +80,7 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 | `board_config.h` | Pin numbers and screen settings (rotation, mirroring, tap direction). The file to edit for a different board. |
 | `epd.h` / `epd.cpp` | Screen driver, based on Good Display's demo code. `epdShowFull()` flashes and clears ghosting (~3.7 s); `epdShowPartial()` updates without flashing (~0.8 s). |
 | `touch.h` / `touch.cpp` | Touch driver. Reports one tap per finger press. |
+| `fonts/` | Font sizes Adafruit GFX does not ship (FreeSerif 8pt, for the page number), made with `tools/make_gfx_font.py`. |
 | `miniz.c` / `miniz.h` | miniz (MIT), for decompressing EPUB contents; only its decompressor is switched on. |
 | `tjpgd.c` / `tjpgd.h` / `tjpgdcnf.h` | TJpgDec, a small JPEG decoder by ChaN (via Bodmer's TJpg_Decoder), configured for grayscale output. |
 

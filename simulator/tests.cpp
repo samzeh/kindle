@@ -42,22 +42,25 @@ static void testReadingHitTest() {
   CHECK_EQ(readingHitTest(320, 400, false), READ_NEXT);
   CHECK_EQ(readingHitTest(479, 400, false), READ_NEXT);
 
-  // Controls visible: the back arrow returns to the library, the rest of the
-  // bar and the page below it dismiss the bar. No page turns while it is up.
-  CHECK_EQ(readingHitTest(10, 30, true), READ_BACK_TO_LIBRARY);
-  CHECK_EQ(readingHitTest(79, 30, true), READ_BACK_TO_LIBRARY);
-  CHECK_EQ(readingHitTest(80, 30, true), READ_HIDE_CONTROLS);
+  // Controls visible: the chevron (top left) returns to the library, the
+  // gear (top right) opens settings, and anything else dismisses the bar.
+  // No page turns while it is up.
+  CHECK_EQ(readingHitTest(10, 20, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(63, 20, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(64, 20, true), READ_HIDE_CONTROLS);
+  CHECK_EQ(readingHitTest(240, 20, true), READ_HIDE_CONTROLS);  // the chapter title
+  CHECK_EQ(readingHitTest(415, 20, true), READ_HIDE_CONTROLS);
+  CHECK_EQ(readingHitTest(416, 20, true), READ_OPEN_SETTINGS);
+  CHECK_EQ(readingHitTest(479, 20, true), READ_OPEN_SETTINGS);
   CHECK_EQ(readingHitTest(240, 400, true), READ_HIDE_CONTROLS);
   CHECK_EQ(readingHitTest(10, 400, true), READ_HIDE_CONTROLS);
 
-  // The bar's bottom edge (BAR_H = 64): last row inside vs. first row below,
-  // both well within the back arrow's x range so only the y boundary is
-  // exercised.
-  CHECK_EQ(readingHitTest(10, 63, true), READ_BACK_TO_LIBRARY);
-  CHECK_EQ(readingHitTest(10, 64, true), READ_HIDE_CONTROLS);
-
-  // The back arrow only counts inside the bar, not down the left edge.
-  CHECK_EQ(readingHitTest(10, 65, true), READ_HIDE_CONTROLS);
+  // The bar's bottom edge (BAR_H = 44): last row inside vs. first row below,
+  // for both icons, so only the y boundary is exercised.
+  CHECK_EQ(readingHitTest(10, 43, true), READ_BACK_TO_LIBRARY);
+  CHECK_EQ(readingHitTest(10, 44, true), READ_HIDE_CONTROLS);
+  CHECK_EQ(readingHitTest(470, 43, true), READ_OPEN_SETTINGS);
+  CHECK_EQ(readingHitTest(470, 44, true), READ_HIDE_CONTROLS);
 }
 
 // The fixture library holds four books plus two files that are not books
