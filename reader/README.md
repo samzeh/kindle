@@ -46,6 +46,12 @@ book.epub --(zip)--> package file: title, author, cover, chapter files, contents
 reading:  text.txt, a few KB at a time --> layout --> screen
 ```
 
+Pages follow Kindle's conventions: a book's first page is its cover (the
+whole cover, as large as fits), and a new page starts at each of the book's
+files (title page, contents, chapters), wherever the book's CSS asks for one
+(`page-break-before` / `break-before`), and at each top-level chapter in the
+table of contents.
+
 A new book's title, author and cover are read when it is first seen, and its
 text is converted and its pages counted the first time it is opened (a
 "Preparing book..." screen shows while that happens). Everything is kept in a

@@ -9,7 +9,7 @@ static const uint16_t PAPER = 0xFFFF;
 static const int16_t MARGIN_X = 24;
 // The reading screen's controls are overlays (they hide the lines under them
 // while shown), so the margins need no room for them.
-static const int16_t MARGIN_TOP = 16;
+static const int16_t MARGIN_TOP = 30;
 static const int16_t MARGIN_BOTTOM = 16;
 static const int MAX_WORDS_PER_LINE = 48;
 static const int16_t MAX_JUSTIFY_STRETCH = 2;  // extra gap allowed, in spaces
@@ -90,6 +90,11 @@ PagePos PageLayout::layoutPage(PagePos start, bool draw) {
       continue;
     }
     const bool atParaStart = pos == 0 || _text.at(pos - 1) == '\n';
+    if (atParaStart && c == TXT_PAGEBREAK) {
+      if (!pageEmpty) break;  // this paragraph starts the next page
+      if (++pos >= len) break;
+      c = _text.at(pos);      // the paragraph's own markers follow
+    }
     bool noIndent = false;
     if (atParaStart) {
       heading = c == TXT_HEADING;

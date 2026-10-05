@@ -379,38 +379,33 @@ static void testControlsVisibleSurvivesRejectedTurn() {
   readingShow(true);
 
   // Run to the end of the book, so the next forward turn is rejected.
-  uint32_t pct = readingProgressPercent(0);
+  const uint32_t last = readingPageCount() - 1;
   int guard = 0;
-  while (guard < 200) {
+  while (readingCurrentPage() < last && guard < 500) {
     readingTurnPage(1);
-    uint32_t next = readingProgressPercent(0);
-    if (next == pct) break;  // stopped moving: this is the last page
-    pct = next;
     guard++;
   }
-  CHECK(guard < 200);  // sanity: the book paginated and we found the end
+  CHECK_EQ(readingCurrentPage(), last);
 
   readingTap(240, 400);            // show the bar
-  uint32_t lastPct = readingProgressPercent(0);
   readingTurnPage(1);              // rejected: already at the last page
-  CHECK_EQ(readingProgressPercent(0), lastPct);  // confirms the rejection
+  CHECK_EQ(readingCurrentPage(), last);  // confirms the rejection
 
   // If the rejected turn had wrongly cleared controlsVisible, this tap would
   // be read as READ_PREV and the page would move backward.
   readingTap(10, 400);
-  CHECK_EQ(readingProgressPercent(0), lastPct);  // unchanged: the tap only hid the bar
+  CHECK_EQ(readingCurrentPage(), last);  // unchanged: the tap only hid the bar
 
   // Accepted case: bring the bar back up, then turn backward -- accepted,
   // since we are not at the first page.
   readingTap(240, 400);
   readingTurnPage(-1);
-  uint32_t afterTurn = readingProgressPercent(0);
-  CHECK(afterTurn < lastPct);       // confirms the turn actually moved
+  CHECK_EQ(readingCurrentPage(), last - 1);  // the turn actually moved
 
   // The bar must already be down now, so the same tap moves a page instead
   // of merely hiding it.
   readingTap(10, 400);
-  CHECK(readingProgressPercent(0) < afterTurn);
+  CHECK_EQ(readingCurrentPage(), last - 2);
 }
 
 // Opening a book resumes on the page containing its saved position, with
@@ -467,11 +462,48 @@ static void testResumeLandsOnSavedPage() {
   hostStoreReset();
 }
 
+// A book's first page is its cover, and every top-level chapter starts a new
+// page, like a Kindle. A book without a cover starts straight with its text.
+static void testCoverAndChapterPages() {
+  hostStoreReset();
+  CHECK(readingOpenBook(0));  // Aardvark Stories: has a cover
+  CHECK_EQ(readingCurrentPage(), 0);
+  CHECK_EQ(readingPageOffset(0), 0);  // the cover...
+  CHECK_EQ(readingPageOffset(1), 0);  // ...then the text from its start
+  readingShow(false);
+  GFXcanvas1 &gfx = appCanvas();
+  int ink = 0;
+  for (int16_t y = 0; y < gfx.height(); y += 4)
+    for (int16_t x = 0; x < gfx.width(); x += 4) ink += !gfx.getPixel(x, y);
+  CHECK(ink > 100);  // the cover was drawn, not a blank page
+
+  std::vector<Chapter> chapters;
+  CHECK(catalogLoadChapters(catalogBook(0), chapters));
+  for (const Chapter &c : chapters) {
+    if (c.depth != 0) continue;  // sub-sections run on
+    bool startsPage = false;
+    for (uint32_t p = 1; p < readingPageCount(); p++) startsPage |= readingPageOffset(p) == c.offset;
+    if (!startsPage) {
+      printf("FAIL chapter \"%s\" does not start a page\n", c.title);
+      failures++;
+    }
+  }
+
+  CHECK(readingOpenBook(2));  // Coverless Notes
+  CHECK_EQ(readingCurrentPage(), 0);
+  CHECK_EQ(readingPageCount(), 1);  // just its text: no cover page added
+  CHECK(readingChapterTitle()[0] != '\0');  // page 1 is text, so in a chapter
+  hostStoreReset();
+}
+
 // The control bar shows the chapter the current page is in: the fixture's
 // first chapter, its sub-section halfway through, then chapter 2.
 static void testChapterTitles() {
   hostStoreReset();
   CHECK(readingOpenBook(0));
+  CHECK_EQ(readingCurrentPage(), 0);  // a new book opens on its cover...
+  CHECK_STR(readingChapterTitle(), "");  // ...which is in no chapter
+  readingTurnPage(1);
   CHECK_STR(readingChapterTitle(), "Chapter 1: The Burrow");
   bool sawScene = false, sawChapter2 = false;
   for (int i = 0; i < 100 && readingCurrentPage() + 1 < readingPageCount(); i++) {
@@ -601,6 +633,7 @@ int main() {
   testControlsVisibleSurvivesRejectedTurn();
   testResumeLandsOnSavedPage();
   testChapterTitles();
+  testCoverAndChapterPages();
   testListRowPercentRightAligned();
   testLibraryGridCaptionMatchesCoverArt();
 

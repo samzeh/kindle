@@ -31,11 +31,21 @@ class XhtmlConverter : public XmlHandler {
 public:
   explicit XhtmlConverter(TextSink &out) : out_(out) {}
 
-  // Starts a new file. `fragments` are the ids (fnv1a; 0 = the file's start)
-  // whose position is wanted; each one's text offset is written to the same
-  // index of `offsets` when the paragraph after it starts (UINT32_MAX until
-  // then). Both arrays must stay valid until endFile.
-  void beginFile(const uint32_t *fragments, uint32_t *offsets, uint16_t count);
+  // Page breaks before elements matching these rules (from the book's CSS).
+  // The array must stay valid while converting.
+  void setBreakRules(const BreakRule *rules, uint16_t count) {
+    rules_ = rules;
+    ruleCount_ = count;
+  }
+
+  // Starts a new file, which also starts a new page. `fragments` are the ids
+  // (fnv1a; 0 = the file's start) whose position is wanted; each one's text
+  // offset is written to the same index of `offsets` when the paragraph
+  // after it starts (UINT32_MAX until then). Where `breakAt` (optional) is
+  // true, that paragraph also starts a new page. The arrays must stay valid
+  // until endFile.
+  void beginFile(const uint32_t *fragments, uint32_t *offsets, uint16_t count,
+                 const bool *breakAt = nullptr);
   void endFile();
 
   uint32_t length() const { return length_; }
@@ -78,6 +88,12 @@ private:
   int skipDepth_ = -1;         // skipping everything until back at this depth
   uint8_t wordLen_ = 0;
 
+  bool matchesBreakRule(const char *name, const XmlAttrs &attrs) const;
+
+  bool pageBreakNext_ = false;  // the next paragraph starts a new page
+  const BreakRule *rules_ = nullptr;
+  uint16_t ruleCount_ = 0;
+  const bool *breakAt_ = nullptr;
   const uint32_t *fragments_ = nullptr;
   uint32_t *offsets_ = nullptr;
   uint16_t count_ = 0;
@@ -93,8 +109,11 @@ private:
 
 // Converts every spine file, in order, into `out`, and builds the chapter
 // list from the table of contents (or, if it has none, from the headings).
-// `progress` (may be null) is called with 0-100 after each file.
+// Each file, each top-level table-of-contents entry, and each element a
+// `rules` entry matches starts a new page. `progress` (may be null) is
+// called with 0-100 after each file.
 bool convertBook(const Zip &zip, const std::vector<SpineItem> &spine,
-                 const std::vector<TocEntry> &toc, TextSink &out,
+                 const std::vector<TocEntry> &toc, const std::vector<BreakRule> &rules,
+                 TextSink &out,
                  std::vector<Chapter> &chapters, void (*progress)(uint8_t percent, void *ctx),
                  void *ctx);

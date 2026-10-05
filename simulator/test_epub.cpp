@@ -307,7 +307,7 @@ static void testConvertBook() {
 
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   const std::string &s = sink.s;
   storageClose(f);
 
@@ -322,8 +322,9 @@ static void testConvertBook() {
     CHECK_STR(chapters[1].title, "A New Scene");
     CHECK_EQ(chapters[1].depth, 1);
     CHECK(startsWith(chapters[1].offset, "A new scene begins here"));
-    CHECK(startsWith(chapters[2].offset, "\x02" "Chapter 2. The Ants"));
-    CHECK(startsWith(chapters[3].offset, "\x02" "Chapter 3. Home"));
+    // Each file starts a new page, so chapters 2 and 3 begin with a break.
+    CHECK(startsWith(chapters[2].offset, "\x04\x02" "Chapter 2. The Ants"));
+    CHECK(startsWith(chapters[3].offset, "\x04\x02" "Chapter 3. Home"));
   }
 
   CHECK(s.find("WHEN the sun rose") != std::string::npos);  // drop cap
@@ -348,7 +349,7 @@ static void testConvertBook() {
   f = openFixture("coverless.epub", zip);
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   CHECK_EQ(chapters.size(), 3);
   if (chapters.size() == 3) {
     CHECK_STR(chapters[0].title, "Coverless Notes");
@@ -373,7 +374,7 @@ static void testFileTextMatchesMemText() {
   StorageFile *f = openFixture("aardvark.epub", zip);
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   storageClose(f);
 
   storageMkdir("/.reader");
@@ -414,6 +415,52 @@ static void testPagePack() {
   }
 }
 
+static void testCssBreakRules() {
+  const char *css =
+    "/* a comment with h1 { page-break-before: always } inside */\n"
+    "h2 { page-break-before: always; margin: 0 }\n"
+    "div.Chapter, .blk { break-before : page }\n"
+    "p { margin: 0 } h3 { page-break-before: avoid }\n"
+    "@media screen { body > section.part { page-break-before: always } }\n"
+    "@font-face { font-family: x; src: url(x.ttf) }\n";
+  MemReader in(css, (uint32_t)strlen(css));
+  std::vector<BreakRule> rules;
+  epubParseBreakRules(in, rules);
+  CHECK_EQ(rules.size(), 4);
+  if (rules.size() == 4) {
+    CHECK(rules[0].tag == fnv1a("h2") && rules[0].cls == 0);
+    CHECK(rules[1].tag == fnv1a("div") && rules[1].cls == fnv1a("chapter"));  // lower-cased
+    CHECK(rules[2].tag == 0 && rules[2].cls == fnv1a("blk"));
+    CHECK(rules[3].tag == fnv1a("section") && rules[3].cls == fnv1a("part"));  // inside @media
+  }
+}
+
+// A new page starts at each file, at elements a CSS rule names, and at
+// elements styled to break -- but never before the book's first paragraph.
+static void testConverterPageBreaks() {
+  std::vector<BreakRule> rules = { { fnv1a("h2"), 0 }, { 0, fnv1a("chapter") } };
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  conv.setBreakRules(rules.data(), (uint16_t)rules.size());
+  const char *files[] = {
+    "<body><p>Title page</p><h2>One</h2><p>a</p><div class=\"x Chapter\"><p>b</p></div></body>",
+    "<body><p>Next file</p><p style=\"page-break-before: always\">c</p><h3>Not a break</h3></body>",
+  };
+  for (const char *f : files) {
+    conv.beginFile(nullptr, nullptr, 0);
+    XmlParser parser(conv);
+    parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+    conv.endFile();
+  }
+  const std::string want =
+    "\x03Title page\n\x04\x02One\n\x03" "a\n\x04" "b\n"
+    "\x04\x03Next file\n\x04" "c\n\x02Not a break";
+  if (sink.s != want) {
+    printf("FAIL page breaks\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
 void runEpubTests() {
   // Storage already points at fixtures/library (tests.cpp's main).
   testZipEntries();
@@ -424,5 +471,7 @@ void runEpubTests() {
   testConverterExact();
   testConvertBook();
   testFileTextMatchesMemText();
+  testCssBreakRules();
+  testConverterPageBreaks();
   testPagePack();
 }

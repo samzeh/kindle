@@ -64,7 +64,9 @@ int main(int argc, char **argv) {
   unsigned long t0 = millis();
   StringSink sink;
   std::vector<Chapter> chapters;
-  bool ok = convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr);
+  std::vector<BreakRule> rules;
+  epubReadBreakRules(zip, info, rules);
+  bool ok = convertBook(zip, spine, toc, rules, sink, chapters, nullptr, nullptr);
   unsigned long ms = millis() - t0;
 
   printf("title:      %s\nauthor:     %s\nidentifier: %s\n", info.title, info.author, info.identifier);
@@ -74,6 +76,9 @@ int main(int argc, char **argv) {
   printf("zip:        %u entries, spine %zu files, toc %zu entries\n", zip.count(), spine.size(),
          toc.size());
   printf("converted:  %s, %zu bytes in %lu ms\n", ok ? "ok" : "FAILED", sink.s.size(), ms);
+  size_t breaks = 0;
+  for (char ch : sink.s) breaks += ch == TXT_PAGEBREAK;
+  printf("page breaks: %zu (%zu CSS rules)\n", breaks, rules.size());
 
   size_t high = 0;
   for (unsigned char c : sink.s)
@@ -94,6 +99,7 @@ int main(int argc, char **argv) {
       if (ch == TXT_HEADING) fputs("[H]", stdout);
       else if (ch == TXT_NOINDENT) fputs("[N]", stdout);
       else if (ch == TXT_ITALIC) fputs("[I]", stdout);
+      else if (ch == TXT_PAGEBREAK) fputs("[PAGE]", stdout);
       else putchar(ch);
     }
     putchar('\n');

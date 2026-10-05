@@ -149,24 +149,32 @@ static bool ditherToBits(const uint8_t *gray, int16_t w, int16_t h, uint8_t *bit
   return true;
 }
 
-// Decodes a JPEG into a w x h grayscale image (0 = black): scaled and
-// cropped to fill the box, then contrast-stretched. Returns it (malloc'd;
-// the caller frees it), or nullptr (out of memory, or a JPEG the decoder does
+// Decodes a JPEG into a w x h grayscale image (0 = black), contrast not yet
+// stretched. With fit = false the image is scaled and cropped to fill w x h
+// exactly; with fit = true it keeps its proportions and all of it, and w and
+// h are reduced to the size it fits in. Returns the image (malloc'd; the
+// caller frees it), or nullptr (out of memory, or a JPEG the decoder does
 // not handle, such as a progressive one).
-static uint8_t *decodeGray(ByteReader &in, int16_t w, int16_t h) {
+static uint8_t *decodeGray(ByteReader &in, int16_t &w, int16_t &h, bool fit) {
   unsigned long t0 = millis();
   CoverDecode d = { &in, nullptr, w, h, 0, 0, 0, 0 };
   void *work = malloc(TJPGD_WORKSPACE_SIZE);
-  d.gray = (uint8_t *)malloc((size_t)w * h);
   JDEC jd;
   JRESULT res = JDR_MEM1;
   bool ok = false;
 
-  if (work && d.gray && (res = jd_prepare(&jd, jpegInput, work, TJPGD_WORKSPACE_SIZE, &d)) == JDR_OK) {
-    // Crop the image to the box's proportions, centred.
+  if (work && (res = jd_prepare(&jd, jpegInput, work, TJPGD_WORKSPACE_SIZE, &d)) == JDR_OK) {
     int32_t cropW = jd.width, cropH = jd.height;
-    if ((int32_t)jd.width * h > (int32_t)jd.height * w) cropW = (int32_t)jd.height * w / h;
-    else cropH = (int32_t)jd.width * h / w;
+    if (fit) {  // shrink the box to the image's proportions
+      if ((int32_t)jd.width * h > (int32_t)jd.height * w) h = (int16_t)((int32_t)jd.height * w / jd.width);
+      else w = (int16_t)((int32_t)jd.width * h / jd.height);
+      d.w = w;
+      d.h = h;
+    } else if ((int32_t)jd.width * h > (int32_t)jd.height * w) {
+      cropW = (int32_t)jd.height * w / h;  // crop to the box's proportions, centred
+    } else {
+      cropH = (int32_t)jd.width * h / w;
+    }
 
     // Let the decoder shrink the image by 1/2, 1/4 or 1/8 as far as it can
     // while staying at least as large as the box: much faster than decoding
@@ -178,10 +186,14 @@ static uint8_t *decodeGray(ByteReader &in, int16_t w, int16_t h) {
     d.cropH = cropH >> scale;
     d.cropX = ((jd.width >> scale) - d.cropW) / 2;
     d.cropY = ((jd.height >> scale) - d.cropH) / 2;
-    memset(d.gray, 255, (size_t)w * h);
-
-    res = jd_decomp(&jd, jpegOutput, scale);
-    ok = res == JDR_OK;
+    d.gray = (uint8_t *)malloc((size_t)w * h);
+    if (d.gray) {
+      memset(d.gray, 255, (size_t)w * h);
+      res = jd_decomp(&jd, jpegOutput, scale);
+      ok = res == JDR_OK;
+    } else {
+      res = JDR_MEM1;
+    }
     if (ok) Serial.printf("cover: %u x %u JPEG at 1/%d -> %d x %d in %lu ms\n", jd.width,
                           jd.height, 1 << scale, w, h, millis() - t0);
   }
@@ -213,7 +225,8 @@ static void boxShrink(const uint8_t *src, int16_t sw, int16_t sh, uint8_t *dst, 
 }
 
 bool coverRender(ByteReader &jpeg, uint8_t *gridBits, uint8_t *thumbBits) {
-  uint8_t *gray = decodeGray(jpeg, COVER_W, COVER_H);
+  int16_t w = COVER_W, h = COVER_H;
+  uint8_t *gray = decodeGray(jpeg, w, h, false);
   if (!gray) return false;
   stretchContrast(gray, (int32_t)COVER_W * COVER_H);
   bool ok = ditherToBits(gray, COVER_W, COVER_H, gridBits);
@@ -229,6 +242,71 @@ bool coverRender(ByteReader &jpeg, uint8_t *gridBits, uint8_t *thumbBits) {
   free(thumb);
   free(gray);
   return ok;
+}
+
+// The cover page: the cover fills a box with the screen's own proportions,
+// inset by this margin at the sides (5% of the screen's width) and centred,
+// so there is white all round it.
+static const int16_t COVER_PAGE_MARGIN_PERCENT = 5;
+
+// Full-screen covers can't be decoded at full size: a 480 x 800 grayscale
+// image is 384 KB, more than the ESP32 has. So the cover is decoded at this
+// size (~54 KB, the screen's proportions), then scaled up smoothly as it is
+// dithered.
+static const int16_t FULL_DECODE_W = 180, FULL_DECODE_H = 300;
+
+bool coverRenderFull(ByteReader &jpeg, Adafruit_GFX &gfx) {
+  const int16_t W = gfx.width(), H = gfx.height();
+  int16_t w = FULL_DECODE_W, h = FULL_DECODE_H;
+  if (W > H) w = FULL_DECODE_H, h = FULL_DECODE_W;
+  uint8_t *gray = decodeGray(jpeg, w, h, false);  // cropped to fill w x h
+  if (!gray) return false;
+  stretchContrast(gray, (int32_t)w * h);
+
+  // The box: the screen's proportions, inset, centred.
+  const int16_t margin = (W < H ? W : H) * COVER_PAGE_MARGIN_PERCENT / 100;
+  const int16_t tw = W - 2 * margin, th = (int16_t)((int32_t)tw * H / W);
+  const int16_t ox = (W - tw) / 2, oy = (H - th) / 2;
+  gfx.fillScreen(PAPER);
+
+  // Floyd-Steinberg as in ditherToBits, reading each output pixel from the
+  // small image by bilinear interpolation (8.8 fixed point).
+  int16_t *errors = (int16_t *)calloc(2 * (tw + 2), sizeof(int16_t));
+  if (!errors) {
+    free(gray);
+    return false;
+  }
+  int16_t *cur = errors + 1, *next = errors + (tw + 2) + 1;
+  for (int16_t py = 0; py < th; py++) {
+    int32_t sy = ((2 * py + 1) * (int32_t)h * 128) / th - 128;
+    if (sy < 0) sy = 0;
+    int16_t y0 = (int16_t)(sy >> 8), y1 = y0 + 1 < h ? y0 + 1 : y0;
+    int32_t fy = sy & 255;
+    for (int16_t px = 0; px < tw; px++) {
+      int32_t sx = ((2 * px + 1) * (int32_t)w * 128) / tw - 128;
+      if (sx < 0) sx = 0;
+      int16_t x0 = (int16_t)(sx >> 8), x1 = x0 + 1 < w ? x0 + 1 : x0;
+      int32_t fx = sx & 255;
+      int32_t top = gray[y0 * w + x0] * (256 - fx) + gray[y0 * w + x1] * fx;
+      int32_t bot = gray[y1 * w + x0] * (256 - fx) + gray[y1 * w + x1] * fx;
+      int16_t v = (int16_t)((top * (256 - fy) + bot * fy) >> 16) + cur[px];
+      int16_t out = v < 128 ? 0 : 255;
+      if (out == 0) gfx.drawPixel(ox + px, oy + py, INK);
+      int16_t err = v - out;
+      cur[px + 1] += err * 7 / 16;
+      next[px - 1] += err * 3 / 16;
+      next[px] += err * 5 / 16;
+      next[px + 1] += err / 16;
+    }
+    int16_t *swap = cur;
+    cur = next;
+    next = swap;
+    memset(next - 1, 0, (tw + 2) * sizeof(int16_t));
+  }
+  free(errors);
+  free(gray);
+  gfx.drawRect(ox - 1, oy - 1, tw + 2, th + 2, INK);  // so a white cover still reads as a cover
+  return true;
 }
 
 // Loads one of the two dithered images from the book's cover.bin, or

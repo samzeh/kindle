@@ -22,6 +22,20 @@ struct EpubInfo {
   char coverPath[EPUB_PATH_MAX];  // path inside the ZIP; "" if no cover
   char tocPath[EPUB_PATH_MAX];    // nav document or NCX; "" if none
   bool tocIsNcx;
+  // The book's stylesheets (fnv1a of their paths), for page-break rules.
+  static const uint8_t MAX_STYLESHEETS = 8;
+  uint32_t styleSheets[MAX_STYLESHEETS];
+  uint8_t styleSheetCount;
+};
+
+// A CSS rule asking for a page break before matching elements
+// (page-break-before / break-before: always, page, left or right), reduced
+// to its simple selector: a tag, a class, or both (fnv1a; 0 = any).
+// "h2", ".chapter" and "div.chapter" are kept; selectors with ids,
+// attributes or more than one class only count their tag and first class.
+struct BreakRule {
+  uint32_t tag;
+  uint32_t cls;
 };
 
 // One chapter file, in reading order. Only the hash of its path is kept; the
@@ -48,6 +62,12 @@ bool epubReadPackage(const Zip &zip, EpubInfo &info, std::vector<SpineItem> &spi
 // Leaves `toc` empty (and returns true) if the book has none.
 bool epubReadToc(const Zip &zip, const EpubInfo &info, const std::vector<SpineItem> &spine,
                  std::vector<TocEntry> &toc);
+
+// Reads the page-break rules from the book's stylesheets (see BreakRule).
+bool epubReadBreakRules(const Zip &zip, const EpubInfo &info, std::vector<BreakRule> &rules);
+
+// Parses CSS text into page-break rules; exposed for tests.
+void epubParseBreakRules(ByteReader &css, std::vector<BreakRule> &rules);
 
 // Resolves a link found in the file `from` (both paths inside the ZIP):
 // joins it to from's folder, handles "../" and %-escapes, and splits off

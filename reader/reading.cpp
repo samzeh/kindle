@@ -54,7 +54,9 @@ static const PageFonts fonts = {
 static FileText text;
 static PageLayout *layout = nullptr;  // made on first use: it needs the canvas
 static uint16_t currentBook = UINT16_MAX;
-static std::vector<uint32_t> pages;  // where each page starts (pagePack)
+// A book's pages: its cover (if it has one) as page 1, then the text pages.
+static bool coverPage = false;
+static std::vector<uint32_t> pages;  // where each text page starts (pagePack)
 static std::vector<Chapter> chapters;
 static uint32_t currentPage = 0;
 static uint8_t turnsSinceFullRefresh = 0;
@@ -137,15 +139,31 @@ static void onConvertProgress(uint8_t pct, void *ctx) {
   }
 }
 
-static PagePos pageStart(uint32_t page) {
-  return pageUnpack(pages[page]);
+static uint32_t pageTotal() {
+  return (uint32_t)pages.size() + coverPage;
 }
 
-// The last page starting at or before `offset`.
+static bool onCover() {
+  return coverPage && currentPage == 0;
+}
+
+// Where a text page starts (page counted from the book's first page; not
+// the cover).
+static PagePos pageStart(uint32_t page) {
+  return pageUnpack(pages[page - coverPage]);
+}
+
+// Where a page starts in the text; the cover counts as the very start.
+static uint32_t pageOffset(uint32_t page) {
+  return coverPage && page == 0 ? 0 : pageStart(page).offset;
+}
+
+// The last text page starting at or before `offset`.
 static uint32_t pageContaining(uint32_t offset) {
   auto it = std::upper_bound(pages.begin(), pages.end(), offset,
                              [](uint32_t off, uint32_t packed) { return off < pageUnpack(packed).offset; });
-  return it == pages.begin() ? 0 : (uint32_t)(it - pages.begin() - 1);
+  uint32_t textPage = it == pages.begin() ? 0 : (uint32_t)(it - pages.begin() - 1);
+  return textPage + coverPage;
 }
 
 bool readingOpenBook(uint16_t index) {
@@ -155,6 +173,7 @@ bool readingOpenBook(uint16_t index) {
   controlsVisible = false;
   turnsSinceFullRefresh = 0;
   currentBook = UINT16_MAX;
+  coverPage = false;
   pages.clear();
 
   if (book.textLength == 0) {
@@ -174,11 +193,14 @@ bool readingOpenBook(uint16_t index) {
     busyShow(book.title, "Counting pages...", 0);
     paginate(book);
   }
+  // The first page is the cover, as on a Kindle. Made once per book; it
+  // overwrites the canvas, which the page about to be shown redraws.
+  coverPage = book.hasCover && catalogPrepareFullCover(index, appCanvas());
   currentBook = index;
 
+  // A book never opened starts at its first page: the cover.
   uint32_t offset = 0;
-  storeLoadProgress(book.id, offset);
-  currentPage = pageContaining(offset);
+  currentPage = storeLoadProgress(book.id, offset) ? pageContaining(offset) : 0;
   return true;
 }
 
@@ -187,12 +209,16 @@ uint32_t readingCurrentPage() {
 }
 
 uint32_t readingPageCount() {
-  return (uint32_t)pages.size();
+  return pageTotal();
+}
+
+uint32_t readingPageOffset(uint32_t page) {
+  return page < pageTotal() ? pageOffset(page) : 0;
 }
 
 static void saveProgress() {
   if (currentBook == UINT16_MAX || pages.empty()) return;
-  storeSaveProgress(catalogBook(currentBook).id, pageStart(currentPage).offset);
+  storeSaveProgress(catalogBook(currentBook).id, pageOffset(currentPage));
 }
 
 ReadingAction readingHitTest(int16_t x, int16_t y, bool barUp) {
@@ -212,7 +238,7 @@ uint32_t readingProgressPercent(uint16_t index) {
   if (book.textLength == 0) return 0;
   uint32_t offset = 0;
   if (index == currentBook && !pages.empty()) {
-    offset = pageStart(currentPage).offset;
+    offset = pageOffset(currentPage);
   } else if (!storeLoadProgress(book.id, offset)) {
     return 0;
   }
@@ -223,8 +249,8 @@ uint32_t readingProgressPercent(uint16_t index) {
 // the next page does, so a page where a new chapter begins counts as that
 // chapter.
 const char *readingChapterTitle() {
-  if (pages.empty() || chapters.empty()) return "";
-  uint32_t end = currentPage + 1 < pages.size() ? pageStart(currentPage + 1).offset : UINT32_MAX;
+  if (pages.empty() || chapters.empty() || onCover()) return "";
+  uint32_t end = currentPage + 1 < pageTotal() ? pageOffset(currentPage + 1) : UINT32_MAX;
   const char *title = "";
   for (const Chapter &c : chapters) {
     if (c.offset >= end) break;
@@ -259,7 +285,7 @@ static void drawGear(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
 // chapter, the book's) in the middle, and the settings gear. drawCentredText
 // truncates the title, so a long one cannot run under the icons.
 static void drawTopBar(Adafruit_GFX &gfx) {
-  gfx.fillRect(0, 0, SCREEN_W, layout->coverDownTo(BAR_H), PAPER);
+  gfx.fillRect(0, 0, SCREEN_W, onCover() ? BAR_H : layout->coverDownTo(BAR_H), PAPER);
   drawChevron(gfx, 30, BAR_MID);
   drawGear(gfx, SCREEN_W - 30, BAR_MID);
 
@@ -276,16 +302,16 @@ static void drawTopBar(Adafruit_GFX &gfx) {
 static void drawProgressLine(Adafruit_GFX &gfx) {
   gfx.drawFastHLine(PROGRESS_X, PROGRESS_Y, PROGRESS_W, INK);
   // Full on the last page.
-  int16_t done = (int16_t)((uint32_t)PROGRESS_W * (currentPage + 1) / pages.size());
+  int16_t done = (int16_t)((uint32_t)PROGRESS_W * (currentPage + 1) / pageTotal());
   gfx.fillRect(PROGRESS_X, PROGRESS_Y - 1, done, 3, INK);
 }
 
 // The bottom strip: "Page 12 of 340".
 static void drawPageStrip(Adafruit_GFX &gfx) {
-  int16_t top = layout->coverUpTo(SCREEN_H - PAGE_STRIP_H);
+  int16_t top = onCover() ? SCREEN_H - PAGE_STRIP_H : layout->coverUpTo(SCREEN_H - PAGE_STRIP_H);
   gfx.fillRect(0, top, SCREEN_W, SCREEN_H - top, PAPER);
   char label[32];
-  snprintf(label, sizeof(label), "Page %u of %u", (unsigned)currentPage + 1, (unsigned)pages.size());
+  snprintf(label, sizeof(label), "Page %u of %u", (unsigned)currentPage + 1, (unsigned)pageTotal());
   gfx.setTextColor(INK);
   drawCentredText(gfx, label, &FreeSerif8pt7b, 0, SCREEN_W, SCREEN_H - 18);
 }
@@ -293,19 +319,23 @@ static void drawPageStrip(Adafruit_GFX &gfx) {
 void readingShow(bool fullRefresh) {
   if (currentBook == UINT16_MAX || pages.empty()) return;
   unsigned long t0 = millis();
-  layout->layoutPage(pageStart(currentPage), true);
-  drawProgressLine(appCanvas());  // the page strip covers it when the controls are up
+  if (onCover()) {
+    if (!catalogLoadFullCover(catalogBook(currentBook), appCanvas())) appCanvas().fillScreen(PAPER);
+  } else {
+    layout->layoutPage(pageStart(currentPage), true);
+    drawProgressLine(appCanvas());  // the page strip covers it when the controls are up
+  }
   if (controlsVisible) {
     drawTopBar(appCanvas());
     drawPageStrip(appCanvas());
   }
   appRefresh(fullRefresh);
   Serial.printf("page %u of %u shown in %lu ms (%s)\n", (unsigned)currentPage + 1,
-                (unsigned)pages.size(), millis() - t0, fullRefresh ? "full" : "partial");
+                (unsigned)pageTotal(), millis() - t0, fullRefresh ? "full" : "partial");
 }
 
 void readingTurnPage(int delta) {
-  if (delta > 0 && currentPage + 1 >= pages.size()) return;  // last page
+  if (delta > 0 && currentPage + 1 >= pageTotal()) return;  // last page
   if (delta < 0 && currentPage == 0) return;
   controlsVisible = false;  // after the guards: a rejected turn changes nothing
   currentPage += delta;

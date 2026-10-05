@@ -15,7 +15,7 @@
 // Bump to make every book's cached title, author and cover be re-read.
 static const uint16_t META_VERSION = 1;
 // Bump when convert.cpp's output changes, so texts are converted again.
-static const uint16_t CONVERT_VERSION = 1;
+static const uint16_t CONVERT_VERSION = 2;
 static const uint32_t META_MAGIC = 0x4D455441;  // "META"
 static const uint32_t TOC_MAGIC = 0x544F4331;   // "TOC1"
 static const uint16_t MAX_BOOKS = 200;
@@ -223,8 +223,10 @@ bool catalogPrepareText(uint16_t index, ConvertProgress progress, void *ctx) {
   EpubInfo *info = new EpubInfo;
   std::vector<SpineItem> spine;
   std::vector<TocEntry> toc;
+  std::vector<BreakRule> rules;
   std::vector<Chapter> chapters;
-  bool ok = zip.open(f) && epubReadPackage(zip, *info, spine) && epubReadToc(zip, *info, spine, toc);
+  bool ok = zip.open(f) && epubReadPackage(zip, *info, spine) && epubReadToc(zip, *info, spine, toc) &&
+            epubReadBreakRules(zip, *info, rules);
   delete info;
 
   char textPath[48], tmpPath[52];
@@ -235,7 +237,7 @@ bool catalogPrepareText(uint16_t index, ConvertProgress progress, void *ctx) {
     StorageFile *out = storageOpen(tmpPath, true);
     FileSink *sink = out ? new FileSink(out) : nullptr;
     ProgressBridge bridge = { progress, ctx };
-    ok = sink && convertBook(zip, spine, toc, *sink, chapters, onConvertProgress, &bridge);
+    ok = sink && convertBook(zip, spine, toc, rules, *sink, chapters, onConvertProgress, &bridge);
     if (sink) {
       sink->flush();
       ok = ok && sink->ok;
@@ -285,5 +287,51 @@ bool catalogLoadChapters(const BookInfo &book, std::vector<Chapter> &chapters) {
   }
   storageClose(f);
   if (!ok) chapters.clear();
+  return ok;
+}
+
+// ---- Full-screen cover ----
+
+// The canvas's buffer, in the panel's own layout whatever the rotation.
+static uint32_t canvasBytes(GFXcanvas1 &canvas) {
+  int16_t rawW = canvas.getRotation() % 2 ? canvas.height() : canvas.width();
+  int16_t rawH = canvas.getRotation() % 2 ? canvas.width() : canvas.height();
+  return (uint32_t)((rawW + 7) / 8) * rawH;
+}
+
+bool catalogLoadFullCover(const BookInfo &book, GFXcanvas1 &canvas) {
+  char path[48];
+  catalogPath(book, "cover-page.bin", path, sizeof(path));
+  StorageFile *f = storageOpen(path, false);
+  if (!f) return false;
+  uint32_t bytes = canvasBytes(canvas);
+  bool ok = storageSize(f) == bytes && storageRead(f, canvas.getBuffer(), bytes) == (int32_t)bytes;
+  storageClose(f);
+  return ok;
+}
+
+bool catalogPrepareFullCover(uint16_t index, GFXcanvas1 &canvas) {
+  if (index >= books.size() || !books[index].hasCover) return false;
+  const BookInfo &book = books[index];
+  if (catalogLoadFullCover(book, canvas)) return true;
+
+  char path[128];
+  bookPath(book, path, sizeof(path));
+  StorageFile *f = storageOpen(path, false);
+  if (!f) return false;
+  Zip zip;
+  EpubInfo *info = new EpubInfo;
+  std::vector<SpineItem> spine;
+  ZipEntry e;
+  ZipEntryReader reader;
+  bool ok = zip.open(f) && epubReadPackage(zip, *info, spine) && info->coverPath[0] &&
+            zip.find(info->coverPath, e) && reader.begin(f, e) && coverRenderFull(reader, canvas);
+  delete info;
+  reader.end();
+  storageClose(f);
+  if (ok) {
+    catalogPath(book, "cover-page.bin", path, sizeof(path));
+    ok = writeFile(path, canvas.getBuffer(), canvasBytes(canvas));
+  }
   return ok;
 }
