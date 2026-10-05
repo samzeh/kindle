@@ -604,6 +604,24 @@ static void testLibraryGridCaptionsEveryBook() {
   CHECK(!inkOutside);
 }
 
+// Each grid cover has a black ribbon at its top right, holding the book's
+// percentage in white. Runs with book 0 part-read (left so by
+// testListRowPercentRightAligned) and the view on grid. The ribbon's
+// rectangle (x 98-135, y 72-93 for the top-left cover) is mostly ink, with
+// some white text inside it, and a white outline to its left.
+static void testLibraryGridRibbon() {
+  CHECK(readingProgressPercent(0) >= 10);
+  libraryShow(false);
+  GFXcanvas1 &gfx = appCanvas();
+  const int16_t rx = 24 + COVER_W - 8 - 38, ry = 72, rw = 38, rh = 22;
+  int ink = 0, paper = 0;
+  for (int16_t y = ry; y < ry + rh; y++)
+    for (int16_t x = rx; x < rx + rw; x++) (gfx.getPixel(x, y) ? paper : ink)++;
+  CHECK(ink > rw * rh * 3 / 4);  // a solid ribbon...
+  CHECK(paper > 10);             // ...with the percentage in white
+  for (int16_t y = ry; y < ry + rh; y++) CHECK(gfx.getPixel(rx - 1, y));  // outline
+}
+
 // THE ORDER OF THE SECOND GROUP IS A CONSTRAINT, NOT A STYLE CHOICE.
 //
 // The first group is order-independent: those tests are pure functions, or they
@@ -616,9 +634,11 @@ static void testLibraryGridCaptionsEveryBook() {
 // one inherits whatever the last one left behind. The dependencies that exist
 // today:
 //
-//   - testLibraryGridCaptionsEveryBook reads the shared canvas directly and
-//     needs the view to be grid, which is also the initial value. It must not
-//     run after anything that leaves the view on list.
+//   - testLibraryGridCaptionsEveryBook and testLibraryGridRibbon read the
+//     shared canvas directly and need the view to be grid, which is also the
+//     initial value. They must not run after anything that leaves the view
+//     on list. The ribbon test also needs book 0 part-read, as
+//     testListRowPercentRightAligned leaves it.
 //   - testListRowPercentRightAligned toggles the view to list and back, so it
 //     is what makes the above hold -- and it is why it must restore grid on the
 //     way out, not merely why it must run before.
@@ -656,6 +676,7 @@ int main() {
   testCoverAndChapterPages();
   testListRowPercentRightAligned();
   testLibraryGridCaptionsEveryBook();
+  testLibraryGridRibbon();
 
   runEpubTests();  // EPUB reading (test_epub.cpp): independent of the above
   if (failures) {

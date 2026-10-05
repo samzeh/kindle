@@ -9,6 +9,7 @@
 #include "catalog.h"
 #include "cover.h"
 #include "epd.h"
+#include "fonts/FreeSerif8pt7b.h"
 #include "icons.h"
 #include "reading.h"
 #include "screens.h"
@@ -38,6 +39,13 @@ static const int16_t GRID_TOP = 72;
 static const int16_t GRID_CAPTION_H = 40;  // two lines of 9pt below the cover
 static const int16_t GRID_CELL_H = COVER_H + GRID_CAPTION_H;  // 220
 static const int16_t GRID_ROW_PITCH = GRID_CELL_H + 8;
+
+// The ribbon on each grid cover: a black bookmark hanging from the cover's
+// top edge near its right side, with how far through the book is in white.
+static const int16_t RIBBON_W = 38;
+static const int16_t RIBBON_H = 22;      // the square part, holding the text
+static const int16_t RIBBON_NOTCH = 9;   // the V cut into its tail
+static const int16_t RIBBON_INSET = 8;   // from the cover's right edge
 
 static int16_t gridColX(int16_t col) {
   return MARGIN_X + col * (COVER_W + GRID_GAP_X);
@@ -176,6 +184,27 @@ static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *fon
   }
 }
 
+// The bookmark ribbon at (x, y), its top-left corner, showing `percent`.
+// Outlined in white so it stays distinct on a dark cover.
+static void drawRibbon(Adafruit_GFX &gfx, int16_t x, int16_t y, uint32_t percent) {
+  int16_t right = x + RIBBON_W - 1, cut = y + RIBBON_H, bottom = cut + RIBBON_NOTCH;
+  int16_t mid = x + RIBBON_W / 2;
+  gfx.fillRect(x, y, RIBBON_W, RIBBON_H, INK);
+  gfx.fillTriangle(x, cut, mid, cut, x, bottom, INK);  // the two tails
+  gfx.fillTriangle(mid, cut, right, cut, right, bottom, INK);
+  // The outline: down both sides, and along the V just below it.
+  gfx.drawFastVLine(x - 1, y, bottom - y + 1, PAPER);
+  gfx.drawFastVLine(right + 1, y, bottom - y + 1, PAPER);
+  gfx.drawLine(x, bottom + 1, mid, cut + 1, PAPER);
+  gfx.drawLine(mid, cut + 1, right, bottom + 1, PAPER);
+  char label[8];
+  snprintf(label, sizeof(label), "%u%%", (unsigned)percent);
+  gfx.setTextColor(PAPER);
+  drawCentredText(gfx, label, &FreeSerif8pt7b, x, RIBBON_W,
+                  baselineCentredOn(FreeSerif8pt7b, y + RIBBON_H / 2));
+  gfx.setTextColor(INK);
+}
+
 static void drawGrid(Adafruit_GFX &gfx) {
   for (int16_t cell = 0; cell < GRID_PER_PAGE; cell++) {
     uint16_t index = (uint16_t)(page * GRID_PER_PAGE + cell);
@@ -184,6 +213,7 @@ static void drawGrid(Adafruit_GFX &gfx) {
     int16_t x = gridColX(cell % GRID_COLS);
     int16_t y = gridRowY(cell / GRID_COLS);
     drawCover(gfx, book, x, y, COVER_W, COVER_H);
+    drawRibbon(gfx, x + COVER_W - RIBBON_INSET - RIBBON_W, y, readingProgressPercent(index));
     gfx.setTextColor(INK);
     drawTwoLines(gfx, book.title, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 16, 18, true);
   }
