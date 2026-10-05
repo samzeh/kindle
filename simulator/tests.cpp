@@ -620,6 +620,19 @@ static void testLibraryGridRibbon() {
   CHECK(ink > rw * rh * 3 / 4);  // a solid ribbon...
   CHECK(paper > 10);             // ...with the percentage in white
   for (int16_t y = ry; y < ry + rh; y++) CHECK(gfx.getPixel(rx - 1, y));  // outline
+
+  // An unread book (book 1, the next cover along) has no ribbon: its cell
+  // shows exactly the cover, as drawCover draws it alone.
+  CHECK_EQ(readingProgressPercent(1), 0u);
+  GFXcanvas1 bare(COVER_W, COVER_H);
+  bare.fillScreen(0xFFFF);
+  drawCover(bare, catalogBook(1), 0, 0, COVER_W, COVER_H);
+  const int16_t cx = 24 + COVER_W + 36;
+  bool same = true;
+  for (int16_t y = 0; y < COVER_H && same; y++)
+    for (int16_t x = 0; x < COVER_W; x++)
+      if (gfx.getPixel(cx + x, ry + y) != bare.getPixel(x, y)) { same = false; break; }
+  CHECK(same);
 }
 
 // THE ORDER OF THE SECOND GROUP IS A CONSTRAINT, NOT A STYLE CHOICE.

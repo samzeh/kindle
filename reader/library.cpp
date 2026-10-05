@@ -41,8 +41,9 @@ static const int16_t GRID_CAPTION_H = 40;  // two lines of 9pt below the cover
 static const int16_t GRID_CELL_H = COVER_H + GRID_CAPTION_H;  // 220
 static const int16_t GRID_ROW_PITCH = GRID_CELL_H + 8;
 
-// The ribbon on each grid cover: a black bookmark hanging from the cover's
-// top edge near its right side, with how far through the book is in white.
+// The ribbon on each started book's grid cover: a black bookmark hanging
+// from the cover's top edge near its right side, with how far through the
+// book is in white.
 static const int16_t RIBBON_W = 30;
 static const int16_t RIBBON_H = 32;      // the straight part, holding the text
 static const int16_t RIBBON_NOTCH = 9;   // the V cut into its tail
@@ -219,7 +220,8 @@ static void drawGrid(Adafruit_GFX &gfx) {
     int16_t x = gridColX(cell % GRID_COLS);
     int16_t y = gridRowY(cell / GRID_COLS);
     drawCover(gfx, book, x, y, COVER_W, COVER_H);
-    drawRibbon(gfx, x + COVER_W - RIBBON_INSET - RIBBON_W, y, readingProgressPercent(index));
+    uint32_t pct = readingProgressPercent(index);
+    if (pct > 0) drawRibbon(gfx, x + COVER_W - RIBBON_INSET - RIBBON_W, y, pct);  // unread: none
     gfx.setTextColor(INK);
     drawTwoLines(gfx, book.title, &FreeSerif9pt7b, x, COVER_W, y + COVER_H + 16, 18, true);
   }
