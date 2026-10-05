@@ -140,18 +140,18 @@ static void testLibraryGridHitTest() {
   CHECK_EQ(libraryHitTest(100, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
   // The cells, sampled at their covers' centres. Columns start at x = 24,
-  // 180 and 336 (120 wide, 36 apart); rows at y = 56 and 284 (220 tall).
+  // 180 and 336 (120 wide, 36 apart); rows at y = 72 and 300 (220 tall).
   const int16_t colMid[3] = { 84, 240, 396 };
   for (int16_t col = 0; col < 3; col++) {
-    LibraryHit hit = libraryHitTest(colMid[col], 150, 0, LIB_VIEW_GRID);
+    LibraryHit hit = libraryHitTest(colMid[col], 160, 0, LIB_VIEW_GRID);
     CHECK_EQ(hit.action, LIB_OPEN_BOOK);
     CHECK_EQ(hit.book, col);
   }
-  LibraryHit secondRow = libraryHitTest(84, 380, 0, LIB_VIEW_GRID);
+  LibraryHit secondRow = libraryHitTest(84, 390, 0, LIB_VIEW_GRID);
   CHECK_EQ(secondRow.action, LIB_OPEN_BOOK);
   CHECK_EQ(secondRow.book, 3);
   // The next cell would be book 4, past the shelf.
-  CHECK_EQ(libraryHitTest(240, 380, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(240, 390, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
   // The gaps between columns open nothing; nor does the left margin.
   CHECK_EQ(libraryHitTest(160, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
@@ -165,12 +165,14 @@ static void testLibraryGridHitTest() {
   CHECK_EQ(libraryHitTest(180, 150, 0, LIB_VIEW_GRID).book, 1);
   CHECK_EQ(libraryHitTest(455, 150, 0, LIB_VIEW_GRID).book, 2);           // col 2 right edge
   CHECK_EQ(libraryHitTest(456, 150, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  CHECK_EQ(libraryHitTest(84, 55, 0, LIB_VIEW_GRID).action, LIB_NONE);    // row 0 top edge
-  CHECK_EQ(libraryHitTest(84, 56, 0, LIB_VIEW_GRID).book, 0);
-  CHECK_EQ(libraryHitTest(84, 275, 0, LIB_VIEW_GRID).book, 0);            // row 0 bottom edge
-  CHECK_EQ(libraryHitTest(84, 276, 0, LIB_VIEW_GRID).action, LIB_NONE);
-  CHECK_EQ(libraryHitTest(84, 283, 0, LIB_VIEW_GRID).action, LIB_NONE);   // row 1 top edge
-  CHECK_EQ(libraryHitTest(84, 284, 0, LIB_VIEW_GRID).book, 3);
+  CHECK_EQ(libraryHitTest(84, 71, 0, LIB_VIEW_GRID).action, LIB_NONE);    // row 0 top edge
+  CHECK_EQ(libraryHitTest(84, 72, 0, LIB_VIEW_GRID).book, 0);
+  CHECK_EQ(libraryHitTest(84, 291, 0, LIB_VIEW_GRID).book, 0);            // row 0 bottom edge
+  CHECK_EQ(libraryHitTest(84, 292, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(84, 299, 0, LIB_VIEW_GRID).action, LIB_NONE);   // row 1 top edge
+  CHECK_EQ(libraryHitTest(84, 300, 0, LIB_VIEW_GRID).book, 3);
+  CHECK_EQ(libraryHitTest(100, 59, 0, LIB_VIEW_GRID).action, LIB_NONE);   // header bottom edge
+  CHECK_EQ(libraryHitTest(400, 59, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
   CHECK_EQ(libraryHitTest(383, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);   // toggle edge
   CHECK_EQ(libraryHitTest(384, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
 
@@ -188,21 +190,21 @@ static void testLibraryGridHitTest() {
 }
 
 static void testLibraryListHitTest() {
-  // Six rows of 118px starting at y = 50.
+  // Six rows of 114px starting at y = 66.
   LibraryHit first = libraryHitTest(240, 80, 0, LIB_VIEW_LIST);
   CHECK_EQ(first.action, LIB_OPEN_BOOK);
   CHECK_EQ(first.book, 0);
 
-  LibraryHit second = libraryHitTest(240, 200, 0, LIB_VIEW_LIST);
+  LibraryHit second = libraryHitTest(240, 220, 0, LIB_VIEW_LIST);
   CHECK_EQ(second.action, LIB_OPEN_BOOK);
   CHECK_EQ(second.book, 1);
 
-  LibraryHit fourth = libraryHitTest(240, 440, 0, LIB_VIEW_LIST);
+  LibraryHit fourth = libraryHitTest(240, 460, 0, LIB_VIEW_LIST);
   CHECK_EQ(fourth.action, LIB_OPEN_BOOK);
   CHECK_EQ(fourth.book, 3);
 
   // Rows past the end of the shelf open nothing.
-  CHECK_EQ(libraryHitTest(240, 560, 0, LIB_VIEW_LIST).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(240, 580, 0, LIB_VIEW_LIST).action, LIB_NONE);
 
   // The other half of the simulator 'o' key's shared point: the same (126, 80)
   // that hits the grid's top-left cover also hits list row 0.
@@ -217,12 +219,12 @@ static void testLibraryListHitTest() {
   // Four books still fit on one page in list view.
   CHECK_EQ(libraryPageCount(LIB_VIEW_LIST), 1);
 
-  // Row boundaries (rows are 118px starting at y = 50): row 0's last pixel
-  // (167) vs row 1's first pixel (168).
-  CHECK_EQ(libraryHitTest(240, 167, 0, LIB_VIEW_LIST).book, 0);
-  CHECK_EQ(libraryHitTest(240, 168, 0, LIB_VIEW_LIST).book, 1);
+  // Row boundaries (rows are 114px starting at y = 66): row 0's last pixel
+  // (179) vs row 1's first pixel (180).
+  CHECK_EQ(libraryHitTest(240, 179, 0, LIB_VIEW_LIST).book, 0);
+  CHECK_EQ(libraryHitTest(240, 180, 0, LIB_VIEW_LIST).book, 1);
 
-  // The last valid row (row 3, book index 3, y 404-521) vs the first row
+  // The last valid row (row 3, book index 3, y 408-521) vs the first row
   // past the shelf (row 4 would be index 4, but catalogCount() == 4).
   CHECK_EQ(libraryHitTest(240, 521, 0, LIB_VIEW_LIST).book, 3);
   CHECK_EQ(libraryHitTest(240, 522, 0, LIB_VIEW_LIST).action, LIB_NONE);
@@ -563,12 +565,12 @@ static void testListRowPercentRightAligned() {
   libraryShow(false);  // redraw the list view with book 0's updated progress
 
   GFXcanvas1 &gfx = appCanvas();
-  // Book 0 is list row 0: y 50-167 (LIST_TOP=50, LIST_ROW_H=118). Scanning
+  // Book 0 is list row 0: y 66-179 (LIST_TOP=66, LIST_ROW_H=114). Scanning
   // x >= 400 stays clear of the progress line (which ends at x = 392) and
   // of the fixture book 0's short title, so only the percentage label's own
   // pixels can be found here.
   int16_t maxInkX = -1;
-  for (int16_t y = 50; y <= 165; y++) {
+  for (int16_t y = 66; y <= 179; y++) {
     for (int16_t x = 400; x < 480; x++) {
       // false == black in GFXcanvas1. Track a true running max, not the last
       // ink pixel visited -- a later row with ink further left would
@@ -586,12 +588,12 @@ static void testListRowPercentRightAligned() {
 // whether or not it has cover art (the grey placeholder at this size has no
 // text of its own), and the caption stays within the cover's width.
 // (Coordinates match library.cpp's grid geometry: the top-left cell starts
-// at (24, 56); it is inside the unrotated test canvas without calling
+// at (24, 72); it is inside the unrotated test canvas without calling
 // appBegin().)
 static void testLibraryGridCaptionsEveryBook() {
   libraryShow(false);
   GFXcanvas1 &gfx = appCanvas();
-  const int16_t cellX = 24, cellY = 56, captionH = 40;
+  const int16_t cellX = 24, cellY = 72, captionH = 40;
   bool inkBelowCover = false, inkOutside = false;
   for (int16_t y = cellY + COVER_H + 1; y < cellY + COVER_H + captionH; y++) {
     for (int16_t x = cellX; x < cellX + COVER_W; x++) inkBelowCover |= !gfx.getPixel(x, y);

@@ -1,7 +1,6 @@
 #include "library.h"
 #include <Adafruit_GFX.h>
 #include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerifBold9pt7b.h>
 #include <Fonts/FreeSerif12pt7b.h>
 #include <Fonts/FreeSerifBold12pt7b.h>
 #include <stdio.h>  // snprintf, for the footer and list progress labels
@@ -10,6 +9,7 @@
 #include "catalog.h"
 #include "cover.h"
 #include "epd.h"
+#include "icons.h"
 #include "reading.h"
 #include "screens.h"
 #include "store.h"
@@ -20,9 +20,13 @@ static const uint16_t PAPER = 0xFFFF;
 static const int16_t SCREEN_W = 480;
 static const int16_t SCREEN_H = 800;
 static const int16_t MARGIN_X = 24;
-static const int16_t HEADER_H = 48;
+// The header's text starts 30px down, as a book's pages do (layout.cpp's
+// MARGIN_TOP), so the two screens share a top edge.
+static const int16_t HEADER_MID = 38;
+static const int16_t HEADER_H = 60;
 static const int16_t BODY_BOTTOM = 760;
 static const int16_t TOGGLE_X = 384;  // header, x >= this toggles the view
+static const int16_t FOOTER_MID = SCREEN_H - 20;
 
 // Grid: three columns of COVER_W covers, spread across the text margins,
 // three rows deep. Each cell is the cover and up to two lines of title,
@@ -30,7 +34,7 @@ static const int16_t TOGGLE_X = 384;  // header, x >= this toggles the view
 static const int16_t GRID_COLS = 3, GRID_ROWS = 3;
 static const int16_t GRID_PER_PAGE = GRID_COLS * GRID_ROWS;
 static const int16_t GRID_GAP_X = (SCREEN_W - 2 * MARGIN_X - GRID_COLS * COVER_W) / (GRID_COLS - 1);  // 36
-static const int16_t GRID_TOP = 56;
+static const int16_t GRID_TOP = 72;
 static const int16_t GRID_CAPTION_H = 40;  // two lines of 9pt below the cover
 static const int16_t GRID_CELL_H = COVER_H + GRID_CAPTION_H;  // 220
 static const int16_t GRID_ROW_PITCH = GRID_CELL_H + 8;
@@ -46,8 +50,8 @@ static int16_t gridRowY(int16_t row) {
 // List: six rows, each a thumbnail, then the title (up to two lines) and a
 // progress line like the one at the bottom of a book's pages.
 static const int16_t LIST_PER_PAGE = 6;
-static const int16_t LIST_TOP = 50;
-static const int16_t LIST_ROW_H = 118;
+static const int16_t LIST_TOP = 66;
+static const int16_t LIST_ROW_H = 114;
 static const int16_t LIST_TEXT_X = 112;   // MARGIN_X + THUMB_W + 16
 static const int16_t LIST_BAR_W = 280;
 static const int16_t LIST_BAR_DY = 90;    // the progress line, from the row's top
@@ -100,32 +104,33 @@ LibraryHit libraryHitTest(int16_t x, int16_t y, uint8_t p, uint8_t v) {
   return listHitTest(x, y, p);
 }
 
-static void drawHeader(Adafruit_GFX &gfx) {
-  gfx.setTextColor(INK);
-  gfx.setFont(&FreeSerifBold9pt7b);
-  gfx.setCursor(MARGIN_X, 30);
-  gfx.print("My Library");
-  // The view toggle, drawn as the name of the view you would switch to.
-  gfx.setFont(&FreeSerif9pt7b);
-  gfx.setCursor(TOGGLE_X + 8, 30);
-  gfx.print(view == LIB_VIEW_GRID ? "List" : "Grid");
+// Where a line of text in `font` goes so its capitals are centred on y.
+static int16_t baselineCentredOn(const GFXfont &font, int16_t y) {
+  const GFXglyph &cap = font.glyph['H' - font.first];
+  return y - cap.yOffset - (cap.height - 1) / 2;
 }
 
+// "Library", and an icon for the view a tap would switch to.
+static void drawHeader(Adafruit_GFX &gfx) {
+  gfx.setTextColor(INK);
+  gfx.setFont(&FreeSerifBold12pt7b);
+  gfx.setCursor(MARGIN_X, baselineCentredOn(FreeSerifBold12pt7b, HEADER_MID));
+  gfx.print("Library");
+  int16_t iconX = SCREEN_W - MARGIN_X - 10;
+  if (view == LIB_VIEW_GRID) iconList(gfx, iconX, HEADER_MID);
+  else iconGrid(gfx, iconX, HEADER_MID);
+}
+
+// "1 / 2", with chevrons for the pages either side.
 static void drawFooter(Adafruit_GFX &gfx) {
   uint8_t pages = libraryPageCount(view);
   if (pages <= 1) return;
   char label[16];
   snprintf(label, sizeof(label), "%u / %u", (unsigned)page + 1, (unsigned)pages);
   gfx.setTextColor(INK);
-  drawCentredText(gfx, label, &FreeSerif9pt7b, 0, SCREEN_W, SCREEN_H - 14);
-  if (page > 0) {
-    gfx.setCursor(MARGIN_X, SCREEN_H - 14);
-    gfx.print("<");
-  }
-  if (page + 1 < pages) {
-    gfx.setCursor(SCREEN_W - MARGIN_X - 10, SCREEN_H - 14);
-    gfx.print(">");
-  }
+  drawCentredText(gfx, label, &FreeSerif12pt7b, 0, SCREEN_W, baselineCentredOn(FreeSerif12pt7b, FOOTER_MID));
+  if (page > 0) iconChevronLeft(gfx, MARGIN_X + 6, FOOTER_MID);
+  if (page + 1 < pages) iconChevronRight(gfx, SCREEN_W - MARGIN_X - 6, FOOTER_MID);
 }
 
 // Draws text on at most two lines within a box `w` wide starting at x:
@@ -169,12 +174,6 @@ static void drawTwoLines(Adafruit_GFX &gfx, const char *text, const GFXfont *fon
       gfx.print(buf);
     }
   }
-}
-
-// Where a line of text in `font` goes so its capitals are centred on y.
-static int16_t baselineCentredOn(const GFXfont &font, int16_t y) {
-  const GFXglyph &cap = font.glyph['H' - font.first];
-  return y - cap.yOffset - (cap.height - 1) / 2;
 }
 
 static void drawGrid(Adafruit_GFX &gfx) {
