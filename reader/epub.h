@@ -28,14 +28,19 @@ struct EpubInfo {
   uint8_t styleSheetCount;
 };
 
-// A CSS rule asking for a page break before matching elements
-// (page-break-before / break-before: always, page, left or right), reduced
-// to its simple selector: a tag, a class, or both (fnv1a; 0 = any).
-// "h2", ".chapter" and "div.chapter" are kept; selectors with ids,
-// attributes or more than one class only count their tag and first class.
+// A CSS rule about page breaks before matching elements, reduced to its
+// simple selector: a tag, a class, or both (fnv1a; 0 = any). "h2",
+// ".chapter" and "div.chapter" are kept; selectors with ids, attributes or
+// more than one class only count their tag and first class.
+//
+// `breaks` is true for page-break-before / break-before: always, page, left
+// or right, and false for avoid or auto -- a rule that cancels a less
+// specific one, as in "h2 { page-break-before: always }" with
+// ".no-break { page-break-before: avoid }".
 struct BreakRule {
   uint32_t tag;
   uint32_t cls;
+  bool breaks;
 };
 
 // One chapter file, in reading order. Only the hash of its path is kept; the

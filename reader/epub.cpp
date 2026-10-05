@@ -318,9 +318,11 @@ static char *cssTrimLower(char *s) {
   return s;
 }
 
-// True if a declaration block asks for a page break before the element.
-static bool cssBreaksBefore(char *body) {
+// What a declaration block says about a page break before the element:
+// 1 = break, 0 = don't (avoid, auto), -1 = nothing.
+static int cssBreakBefore(char *body) {
   cssTrimLower(body);
+  int says = -1;
   for (char *p = body; (p = strstr(p, "break-before")); p += 12) {
     char *v = p + 12;
     while (cssSpace(*v)) v++;
@@ -328,13 +330,15 @@ static bool cssBreaksBefore(char *body) {
     v++;
     while (cssSpace(*v)) v++;
     for (const char *want : { "always", "page", "left", "right", "recto", "verso" })
-      if (strncmp(v, want, strlen(want)) == 0) return true;
+      if (strncmp(v, want, strlen(want)) == 0) says = 1;
+    for (const char *want : { "avoid", "auto" })
+      if (strncmp(v, want, strlen(want)) == 0) says = 0;
   }
-  return false;
+  return says;
 }
 
 // Adds one rule per selector in a selector list ("h2, div.chapter").
-static void cssAddSelectors(char *list, std::vector<BreakRule> &rules) {
+static void cssAddSelectors(char *list, bool breaks, std::vector<BreakRule> &rules) {
   for (char *sel = strtok(list, ","); sel; sel = strtok(nullptr, ",")) {
     sel = cssTrimLower(sel);
     // Only the last part of a selector names the element itself.
@@ -352,7 +356,8 @@ static void cssAddSelectors(char *list, std::vector<BreakRule> &rules) {
       while (*p && *p != '.' && *p != '#' && *p != ':' && *p != '[' && c + 1 < sizeof(cls)) cls[c++] = *p++;
       cls[c] = '\0';
     }
-    BreakRule r = { tag[0] && strcmp(tag, "*") != 0 ? fnv1a(tag) : 0, cls[0] ? fnv1a(cls) : 0 };
+    BreakRule r = { tag[0] && strcmp(tag, "*") != 0 ? fnv1a(tag) : 0, cls[0] ? fnv1a(cls) : 0,
+                    breaks };
     if (r.tag || r.cls) rules.push_back(r);
   }
 }
@@ -398,7 +403,8 @@ void epubParseBreakRules(ByteReader &css, std::vector<BreakRule> &rules) {
         body[bodyLen] = '\0';
         sel[selLen] = '\0';
         char *s = cssTrimLower(sel);
-        if (s[0] != '@' && cssBreaksBefore(body)) cssAddSelectors(s, rules);
+        int says = s[0] != '@' ? cssBreakBefore(body) : -1;
+        if (says >= 0) cssAddSelectors(s, says == 1, rules);
         inBody = false;
         selLen = 0;
       } else if (bodyLen + 1 < sizeof(body)) {

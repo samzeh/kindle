@@ -15,7 +15,7 @@
 // Bump to make every book's cached title, author and cover be re-read.
 static const uint16_t META_VERSION = 1;
 // Bump when convert.cpp's output changes, so texts are converted again.
-static const uint16_t CONVERT_VERSION = 2;
+static const uint16_t CONVERT_VERSION = 3;  // 3: no-break rules; title pages kept whole
 static const uint32_t META_MAGIC = 0x4D455441;  // "META"
 static const uint32_t TOC_MAGIC = 0x544F4331;   // "TOC1"
 static const uint16_t MAX_BOOKS = 200;

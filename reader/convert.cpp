@@ -117,8 +117,12 @@ void XhtmlConverter::startParagraph() {
   for (uint8_t i = 0; i < pendingCount_; i++) offsets_[pending_[i]] = length_;
   pendingCount_ = 0;
   if (capturingHeading_) headingOffset_ = length_;
-  if (pageBreakNext_ && !first) put(&TXT_PAGEBREAK, 1);
-  pageBreakNext_ = false;
+  if ((pageBreakNext_ || (tocBreakNext_ && textOnPage_)) && !first) {
+    put(&TXT_PAGEBREAK, 1);
+    textOnPage_ = false;
+  }
+  pageBreakNext_ = tocBreakNext_ = false;
+  if (headingDepth_ == 0) textOnPage_ = true;
   if (headingDepth_ > 0) {
     put(&TXT_HEADING, 1);
   } else if (noIndentNext_) {
@@ -161,7 +165,7 @@ void XhtmlConverter::startTag(const char *name, const XmlAttrs &a, bool selfClos
     for (uint16_t i = 0; i < count_; i++) {
       if (fragments_[i] == h && offsets_[i] == UINT32_MAX && pendingCount_ < MAX_PENDING) {
         pending_[pendingCount_++] = i;
-        if (breakAt_ && breakAt_[i]) pageBreakNext_ = true;
+        if (breakAt_ && breakAt_[i]) tocBreakNext_ = true;
       }
     }
   }
@@ -207,8 +211,24 @@ void XhtmlConverter::startTag(const char *name, const XmlAttrs &a, bool selfClos
   }
 }
 
-// True if the element asks for a page break before it: by a CSS rule from
-// the book's stylesheets, or in its own style attribute.
+// Whether the element has the class (fnv1a, lower-cased). The class
+// attribute is a list; compared lower-cased, as the rules are.
+static bool hasClass(const char *cls, uint32_t want) {
+  for (const char *p = cls; p && *p;) {
+    while (*p == ' ') p++;
+    char word[48];
+    size_t n = 0;
+    for (; *p && *p != ' '; p++)
+      if (n + 1 < sizeof(word)) word[n++] = (*p >= 'A' && *p <= 'Z') ? (char)(*p - 'A' + 'a') : *p;
+    if (n && fnv1a((const void *)word, n) == want) return true;
+  }
+  return false;
+}
+
+// True if the element asks for a page break before it: in its own style
+// attribute, or by the most specific CSS rule from the book's stylesheets
+// that matches it (a class outweighs a tag, so ".no-break" can cancel
+// "h2"; between equals, the later rule wins).
 bool XhtmlConverter::matchesBreakRule(const char *name, const XmlAttrs &a) const {
   const char *style = a.get("style");
   if (style && (strstr(style, "break-before: always") || strstr(style, "break-before:always") ||
@@ -217,22 +237,19 @@ bool XhtmlConverter::matchesBreakRule(const char *name, const XmlAttrs &a) const
   if (!ruleCount_) return false;
   uint32_t tag = fnv1a(name);
   const char *cls = a.get("class");
+  int best = -1;
+  bool breaks = false;
   for (uint16_t r = 0; r < ruleCount_; r++) {
     const BreakRule &rule = rules_[r];
     if (rule.tag && rule.tag != tag) continue;
-    if (!rule.cls) return true;
-    // Does the element have this class? The class attribute is a list;
-    // compared lower-cased, as the rules are.
-    for (const char *p = cls; p && *p;) {
-      while (*p == ' ') p++;
-      char word[48];
-      size_t n = 0;
-      for (; *p && *p != ' '; p++)
-        if (n + 1 < sizeof(word)) word[n++] = (*p >= 'A' && *p <= 'Z') ? (char)(*p - 'A' + 'a') : *p;
-      if (n && fnv1a((const void *)word, n) == rule.cls) return true;
+    if (rule.cls && !hasClass(cls, rule.cls)) continue;
+    int weight = (rule.cls ? 10 : 0) + (rule.tag ? 1 : 0);  // as CSS counts it
+    if (weight >= best) {
+      best = weight;
+      breaks = rule.breaks;
     }
   }
-  return false;
+  return breaks;
 }
 
 void XhtmlConverter::endTag(const char *name) {

@@ -31,8 +31,9 @@ class XhtmlConverter : public XmlHandler {
 public:
   explicit XhtmlConverter(TextSink &out) : out_(out) {}
 
-  // Page breaks before elements matching these rules (from the book's CSS).
-  // The array must stay valid while converting.
+  // Page breaks before elements matching these rules (from the book's CSS):
+  // the most specific matching rule decides, the later one on a tie. The
+  // array must stay valid while converting.
   void setBreakRules(const BreakRule *rules, uint16_t count) {
     rules_ = rules;
     ruleCount_ = count;
@@ -42,8 +43,9 @@ public:
   // (fnv1a; 0 = the file's start) whose position is wanted; each one's text
   // offset is written to the same index of `offsets` when the paragraph
   // after it starts (UINT32_MAX until then). Where `breakAt` (optional) is
-  // true, that paragraph also starts a new page. The arrays must stay valid
-  // until endFile.
+  // true, that paragraph also starts a new page -- unless the page so far
+  // holds only headings, as a title page does, when it joins them. The
+  // arrays must stay valid until endFile.
   void beginFile(const uint32_t *fragments, uint32_t *offsets, uint16_t count,
                  const bool *breakAt = nullptr);
   void endFile();
@@ -91,6 +93,8 @@ private:
   bool matchesBreakRule(const char *name, const XmlAttrs &attrs) const;
 
   bool pageBreakNext_ = false;  // the next paragraph starts a new page
+  bool tocBreakNext_ = false;   // ...if the page has more than headings
+  bool textOnPage_ = false;     // a paragraph other than a heading since the last break
   const BreakRule *rules_ = nullptr;
   uint16_t ruleCount_ = 0;
   const bool *breakAt_ = nullptr;

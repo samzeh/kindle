@@ -426,19 +426,20 @@ static void testCssBreakRules() {
   MemReader in(css, (uint32_t)strlen(css));
   std::vector<BreakRule> rules;
   epubParseBreakRules(in, rules);
-  CHECK_EQ(rules.size(), 4);
-  if (rules.size() == 4) {
-    CHECK(rules[0].tag == fnv1a("h2") && rules[0].cls == 0);
+  CHECK_EQ(rules.size(), 5);
+  if (rules.size() == 5) {
+    CHECK(rules[0].tag == fnv1a("h2") && rules[0].cls == 0 && rules[0].breaks);
     CHECK(rules[1].tag == fnv1a("div") && rules[1].cls == fnv1a("chapter"));  // lower-cased
-    CHECK(rules[2].tag == 0 && rules[2].cls == fnv1a("blk"));
-    CHECK(rules[3].tag == fnv1a("section") && rules[3].cls == fnv1a("part"));  // inside @media
+    CHECK(rules[2].tag == 0 && rules[2].cls == fnv1a("blk") && rules[2].breaks);
+    CHECK(rules[3].tag == fnv1a("h3") && !rules[3].breaks);  // avoid: kept, to cancel others
+    CHECK(rules[4].tag == fnv1a("section") && rules[4].cls == fnv1a("part"));  // inside @media
   }
 }
 
 // A new page starts at each file, at elements a CSS rule names, and at
 // elements styled to break -- but never before the book's first paragraph.
 static void testConverterPageBreaks() {
-  std::vector<BreakRule> rules = { { fnv1a("h2"), 0 }, { 0, fnv1a("chapter") } };
+  std::vector<BreakRule> rules = { { fnv1a("h2"), 0, true }, { 0, fnv1a("chapter"), true } };
   StringSink sink;
   XhtmlConverter conv(sink);
   conv.setBreakRules(rules.data(), (uint16_t)rules.size());
@@ -461,6 +462,55 @@ static void testConverterPageBreaks() {
   }
 }
 
+// A more specific "avoid" rule cancels a break: Project Gutenberg's
+// stylesheets break before every h2 but mark the author line of a title
+// page <h2 class="no-break">.
+static void testConverterNoBreakRule() {
+  std::vector<BreakRule> rules = { { 0, fnv1a("no-break"), false }, { fnv1a("h2"), 0, true },
+                                   { fnv1a("h3"), 0, true }, { fnv1a("h3"), 0, false } };
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  conv.setBreakRules(rules.data(), (uint16_t)rules.size());
+  const char *f = "<body><p>a</p><h2 class=\"No-Break\">By</h2><h2>Two</h2><h3>Three</h3></body>";
+  conv.beginFile(nullptr, nullptr, 0);
+  XmlParser parser(conv);
+  parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+  conv.endFile();
+  // The class rule outweighs the tag rule whatever the order; between the
+  // two equal h3 rules, the later (avoid) wins.
+  const std::string want = "\x03" "a\n\x02" "By\n\x04\x02Two\n\x02Three";
+  if (sink.s != want) {
+    printf("FAIL no-break rule\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
+// Table-of-contents entries start a new page, except while the page holds
+// only headings: Project Gutenberg lists a title page's title and subtitle
+// as two entries, which belong on one page.
+static void testConverterTocBreaksKeepTitlePage() {
+  const uint32_t fragments[] = { fnv1a("t"), fnv1a("sub"), fnv1a("ch1"), fnv1a("ch2") };
+  const bool breakAt[] = { true, true, true, true };
+  uint32_t offsets[4];
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  const char *f =
+    "<body><h1 id=\"t\">Title</h1><h3 id=\"sub\">Subtitle</h3><h2>By Someone</h2>"
+    "<h2 id=\"ch1\">One</h2><p>a</p><h2 id=\"ch2\">Two</h2><p>b</p></body>";
+  conv.beginFile(fragments, offsets, 4, breakAt);
+  XmlParser parser(conv);
+  parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+  conv.endFile();
+  // "One" follows only headings too, so it joins the title page; "Two"
+  // follows text, so it starts a page.
+  const std::string want =
+    "\x02Title\n\x02Subtitle\n\x02" "By Someone\n\x02One\n\x03" "a\n\x04\x02Two\n\x03" "b";
+  if (sink.s != want) {
+    printf("FAIL title page\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
 void runEpubTests() {
   // Storage already points at fixtures/library (tests.cpp's main).
   testZipEntries();
@@ -472,6 +522,8 @@ void runEpubTests() {
   testConvertBook();
   testFileTextMatchesMemText();
   testCssBreakRules();
+  testConverterNoBreakRule();
+  testConverterTocBreaksKeepTitlePage();
   testConverterPageBreaks();
   testPagePack();
 }
