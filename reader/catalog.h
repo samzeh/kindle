@@ -8,6 +8,7 @@
 //   text.txt   the book's text in the reader's format (textformat.h)
 //   toc.bin    the chapter list
 //   pages.bin  where each page starts (written by reading.cpp)
+//   cover-page.bin  the cover as a whole page, the book's first page
 // Title, author and cover are read when a book is first seen; the text and
 // chapters when it is first opened. Files are written under a .tmp name and
 // renamed when complete, so an interrupted import just runs again.
@@ -15,6 +16,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <vector>
+
+#include <Adafruit_GFX.h>
 
 #include "convert.h"
 
@@ -48,3 +51,10 @@ bool catalogPrepareText(uint16_t index, ConvertProgress progress, void *ctx);
 
 // Reads the chapter list written by catalogPrepareText.
 bool catalogLoadChapters(const BookInfo &book, std::vector<Chapter> &chapters);
+
+// The book's cover as a whole screen, for its first page. Rendered into
+// `canvas` and saved the first time (about a second on the ESP32; the
+// canvas is overwritten), loaded into `canvas` after that. False if the
+// book has no cover or it cannot be drawn.
+bool catalogPrepareFullCover(uint16_t index, GFXcanvas1 &canvas);
+bool catalogLoadFullCover(const BookInfo &book, GFXcanvas1 &canvas);

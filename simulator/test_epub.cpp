@@ -19,7 +19,6 @@
 #include <Fonts/FreeSerifItalic12pt7b.h>
 #include <Fonts/FreeSerifBold12pt7b.h>
 #include <Fonts/FreeSerifBoldItalic12pt7b.h>
-#include <Fonts/FreeSerif9pt7b.h>
 #include "zip.h"
 
 namespace {
@@ -308,7 +307,7 @@ static void testConvertBook() {
 
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   const std::string &s = sink.s;
   storageClose(f);
 
@@ -323,8 +322,9 @@ static void testConvertBook() {
     CHECK_STR(chapters[1].title, "A New Scene");
     CHECK_EQ(chapters[1].depth, 1);
     CHECK(startsWith(chapters[1].offset, "A new scene begins here"));
-    CHECK(startsWith(chapters[2].offset, "\x02" "Chapter 2. The Ants"));
-    CHECK(startsWith(chapters[3].offset, "\x02" "Chapter 3. Home"));
+    // Each file starts a new page, so chapters 2 and 3 begin with a break.
+    CHECK(startsWith(chapters[2].offset, "\x04\x02" "Chapter 2. The Ants"));
+    CHECK(startsWith(chapters[3].offset, "\x04\x02" "Chapter 3. Home"));
   }
 
   CHECK(s.find("WHEN the sun rose") != std::string::npos);  // drop cap
@@ -349,7 +349,7 @@ static void testConvertBook() {
   f = openFixture("coverless.epub", zip);
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   CHECK_EQ(chapters.size(), 3);
   if (chapters.size() == 3) {
     CHECK_STR(chapters[0].title, "Coverless Notes");
@@ -374,7 +374,7 @@ static void testFileTextMatchesMemText() {
   StorageFile *f = openFixture("aardvark.epub", zip);
   if (!f) return;
   CHECK(epubReadPackage(zip, info, spine) && epubReadToc(zip, info, spine, toc));
-  CHECK(convertBook(zip, spine, toc, sink, chapters, nullptr, nullptr));
+  CHECK(convertBook(zip, spine, toc, {}, sink, chapters, nullptr, nullptr));
   storageClose(f);
 
   storageMkdir("/.reader");
@@ -383,7 +383,7 @@ static void testFileTextMatchesMemText() {
   storageClose(out);
 
   const PageFonts fonts = { &FreeSerif12pt7b, &FreeSerifItalic12pt7b, &FreeSerifBold12pt7b,
-                            &FreeSerifBoldItalic12pt7b, &FreeSerif9pt7b };
+                            &FreeSerifBoldItalic12pt7b };
   GFXcanvas1 canvas(480, 800);
   MemText mem(sink.s.data(), (uint32_t)sink.s.size());
   FileText file(64);
@@ -415,6 +415,102 @@ static void testPagePack() {
   }
 }
 
+static void testCssBreakRules() {
+  const char *css =
+    "/* a comment with h1 { page-break-before: always } inside */\n"
+    "h2 { page-break-before: always; margin: 0 }\n"
+    "div.Chapter, .blk { break-before : page }\n"
+    "p { margin: 0 } h3 { page-break-before: avoid }\n"
+    "@media screen { body > section.part { page-break-before: always } }\n"
+    "@font-face { font-family: x; src: url(x.ttf) }\n";
+  MemReader in(css, (uint32_t)strlen(css));
+  std::vector<BreakRule> rules;
+  epubParseBreakRules(in, rules);
+  CHECK_EQ(rules.size(), 5);
+  if (rules.size() == 5) {
+    CHECK(rules[0].tag == fnv1a("h2") && rules[0].cls == 0 && rules[0].breaks);
+    CHECK(rules[1].tag == fnv1a("div") && rules[1].cls == fnv1a("chapter"));  // lower-cased
+    CHECK(rules[2].tag == 0 && rules[2].cls == fnv1a("blk") && rules[2].breaks);
+    CHECK(rules[3].tag == fnv1a("h3") && !rules[3].breaks);  // avoid: kept, to cancel others
+    CHECK(rules[4].tag == fnv1a("section") && rules[4].cls == fnv1a("part"));  // inside @media
+  }
+}
+
+// A new page starts at each file, at elements a CSS rule names, and at
+// elements styled to break -- but never before the book's first paragraph.
+static void testConverterPageBreaks() {
+  std::vector<BreakRule> rules = { { fnv1a("h2"), 0, true }, { 0, fnv1a("chapter"), true } };
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  conv.setBreakRules(rules.data(), (uint16_t)rules.size());
+  const char *files[] = {
+    "<body><p>Title page</p><h2>One</h2><p>a</p><div class=\"x Chapter\"><p>b</p></div></body>",
+    "<body><p>Next file</p><p style=\"page-break-before: always\">c</p><h3>Not a break</h3></body>",
+  };
+  for (const char *f : files) {
+    conv.beginFile(nullptr, nullptr, 0);
+    XmlParser parser(conv);
+    parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+    conv.endFile();
+  }
+  const std::string want =
+    "\x03Title page\n\x04\x02One\n\x03" "a\n\x04" "b\n"
+    "\x04\x03Next file\n\x04" "c\n\x02Not a break";
+  if (sink.s != want) {
+    printf("FAIL page breaks\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
+// A more specific "avoid" rule cancels a break: Project Gutenberg's
+// stylesheets break before every h2 but mark the author line of a title
+// page <h2 class="no-break">.
+static void testConverterNoBreakRule() {
+  std::vector<BreakRule> rules = { { 0, fnv1a("no-break"), false }, { fnv1a("h2"), 0, true },
+                                   { fnv1a("h3"), 0, true }, { fnv1a("h3"), 0, false } };
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  conv.setBreakRules(rules.data(), (uint16_t)rules.size());
+  const char *f = "<body><p>a</p><h2 class=\"No-Break\">By</h2><h2>Two</h2><h3>Three</h3></body>";
+  conv.beginFile(nullptr, nullptr, 0);
+  XmlParser parser(conv);
+  parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+  conv.endFile();
+  // The class rule outweighs the tag rule whatever the order; between the
+  // two equal h3 rules, the later (avoid) wins.
+  const std::string want = "\x03" "a\n\x02" "By\n\x04\x02Two\n\x02Three";
+  if (sink.s != want) {
+    printf("FAIL no-break rule\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
+// Table-of-contents entries start a new page, except while the page holds
+// only headings: Project Gutenberg lists a title page's title and subtitle
+// as two entries, which belong on one page.
+static void testConverterTocBreaksKeepTitlePage() {
+  const uint32_t fragments[] = { fnv1a("t"), fnv1a("sub"), fnv1a("ch1"), fnv1a("ch2") };
+  const bool breakAt[] = { true, true, true, true };
+  uint32_t offsets[4];
+  StringSink sink;
+  XhtmlConverter conv(sink);
+  const char *f =
+    "<body><h1 id=\"t\">Title</h1><h3 id=\"sub\">Subtitle</h3><h2>By Someone</h2>"
+    "<h2 id=\"ch1\">One</h2><p>a</p><h2 id=\"ch2\">Two</h2><p>b</p></body>";
+  conv.beginFile(fragments, offsets, 4, breakAt);
+  XmlParser parser(conv);
+  parser.feed((const uint8_t *)f, (uint32_t)strlen(f));
+  conv.endFile();
+  // "One" follows only headings too, so it joins the title page; "Two"
+  // follows text, so it starts a page.
+  const std::string want =
+    "\x02Title\n\x02Subtitle\n\x02" "By Someone\n\x02One\n\x03" "a\n\x04\x02Two\n\x03" "b";
+  if (sink.s != want) {
+    printf("FAIL title page\n  got:  %s\n  want: %s\n", visible(sink.s).c_str(), visible(want).c_str());
+    failures++;
+  }
+}
+
 void runEpubTests() {
   // Storage already points at fixtures/library (tests.cpp's main).
   testZipEntries();
@@ -425,5 +521,9 @@ void runEpubTests() {
   testConverterExact();
   testConvertBook();
   testFileTextMatchesMemText();
+  testCssBreakRules();
+  testConverterNoBreakRule();
+  testConverterTocBreaksKeepTitlePage();
+  testConverterPageBreaks();
   testPagePack();
 }

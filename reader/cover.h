@@ -56,6 +56,14 @@ void drawCentredText(Adafruit_GFX &gfx, const char *text, const GFXfont *font,
 // handle, such as a progressive one).
 bool coverRender(ByteReader &jpeg, uint8_t *gridBits, uint8_t *thumbBits);
 
+// Draws a cover as a whole page, for the first page of a book: filling a
+// box with the screen's proportions (cropped to fit, like a phone
+// wallpaper), inset with white all round and a thin frame. Decoded at a
+// reduced size (about 54 KB of heap) and scaled up smoothly while
+// dithering, since a full-size grayscale image would not fit in the ESP32's
+// memory.
+bool coverRenderFull(ByteReader &jpeg, Adafruit_GFX &gfx);
+
 // Draws `book`'s cover into the w x h box at (x, y), with a 1px frame, from
 // its cover.bin (exact at COVER_W x COVER_H and THUMB_W x THUMB_H).
 //

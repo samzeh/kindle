@@ -145,6 +145,8 @@ struct ManifestHandler : XmlHandler {
       const char *props = a.get("properties");
       const char *type = a.get("media-type");
       bool isImage = type && strncmp(type, "image/", 6) == 0;
+      if (type && strcmp(type, "text/css") == 0 && info.styleSheetCount < EpubInfo::MAX_STYLESHEETS)
+        info.styleSheets[info.styleSheetCount++] = fnv1a(path);
       if ((props && strstr(props, "cover-image")) || (coverIdHash && idHash == coverIdHash && isImage)) {
         copyString(info.coverPath, sizeof(info.coverPath), path);
       } else if (isImage && !fallbackCover[0] && strstr(href, "cover")) {
@@ -297,4 +299,127 @@ bool epubReadToc(const Zip &zip, const EpubInfo &info, const std::vector<SpineIt
   }
   NavHandler h(builder);
   return epubParseFile(zip, info.tocPath, h);
+}
+
+// ---- Page-break rules from CSS ----
+
+static bool cssSpace(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Lower-cases and trims s in place; returns it.
+static char *cssTrimLower(char *s) {
+  while (cssSpace(*s)) s++;
+  char *end = s + strlen(s);
+  while (end > s && cssSpace(end[-1])) end--;
+  *end = '\0';
+  for (char *p = s; *p; p++)
+    if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+  return s;
+}
+
+// What a declaration block says about a page break before the element:
+// 1 = break, 0 = don't (avoid, auto), -1 = nothing.
+static int cssBreakBefore(char *body) {
+  cssTrimLower(body);
+  int says = -1;
+  for (char *p = body; (p = strstr(p, "break-before")); p += 12) {
+    char *v = p + 12;
+    while (cssSpace(*v)) v++;
+    if (*v != ':') continue;
+    v++;
+    while (cssSpace(*v)) v++;
+    for (const char *want : { "always", "page", "left", "right", "recto", "verso" })
+      if (strncmp(v, want, strlen(want)) == 0) says = 1;
+    for (const char *want : { "avoid", "auto" })
+      if (strncmp(v, want, strlen(want)) == 0) says = 0;
+  }
+  return says;
+}
+
+// Adds one rule per selector in a selector list ("h2, div.chapter").
+static void cssAddSelectors(char *list, bool breaks, std::vector<BreakRule> &rules) {
+  for (char *sel = strtok(list, ","); sel; sel = strtok(nullptr, ",")) {
+    sel = cssTrimLower(sel);
+    // Only the last part of a selector names the element itself.
+    char *last = sel;
+    for (char *p = sel; *p; p++)
+      if (cssSpace(*p) || *p == '>' || *p == '+' || *p == '~') last = p + 1;
+    char tag[32] = "", cls[48] = "";
+    size_t t = 0, c = 0;
+    char *p = last;
+    while (*p && *p != '.' && *p != '#' && *p != ':' && *p != '[' && t + 1 < sizeof(tag)) tag[t++] = *p++;
+    tag[t] = '\0';
+    while (*p && *p != '.') p++;
+    if (*p == '.') {
+      p++;
+      while (*p && *p != '.' && *p != '#' && *p != ':' && *p != '[' && c + 1 < sizeof(cls)) cls[c++] = *p++;
+      cls[c] = '\0';
+    }
+    BreakRule r = { tag[0] && strcmp(tag, "*") != 0 ? fnv1a(tag) : 0, cls[0] ? fnv1a(cls) : 0,
+                    breaks };
+    if (r.tag || r.cls) rules.push_back(r);
+  }
+}
+
+void epubParseBreakRules(ByteReader &css, std::vector<BreakRule> &rules) {
+  char sel[256], body[256];
+  size_t selLen = 0, bodyLen = 0;
+  bool inBody = false, inComment = false;
+  char prev = 0;
+  uint8_t buf[256];
+  int32_t n;
+  while ((n = css.read(buf, sizeof(buf))) > 0) {
+    for (int32_t i = 0; i < n; i++) {
+      char c = (char)buf[i];
+      if (inComment) {
+        if (prev == '*' && c == '/') inComment = false, c = 0;
+        prev = c;
+        continue;
+      }
+      if (prev == '/' && c == '*') {  // the '/' was already stored: take it back
+        inComment = true;
+        if (inBody && bodyLen) bodyLen--;
+        if (!inBody && selLen) selLen--;
+        prev = 0;
+        continue;
+      }
+      prev = c;
+      if (!inBody) {
+        if (c == '{') {
+          sel[selLen] = '\0';
+          char *s = cssTrimLower(sel);
+          // @media and @supports hold ordinary rules: keep reading inside.
+          // Any other at-rule (@font-face, @page) is a rule of its own.
+          inBody = !(strncmp(s, "@media", 6) == 0 || strncmp(s, "@supports", 9) == 0);
+          if (!inBody) selLen = 0;
+          bodyLen = 0;
+        } else if (c == '}') {
+          selLen = 0;  // the end of an @media block
+        } else if (selLen + 1 < sizeof(sel)) {
+          sel[selLen++] = c;
+        }
+      } else if (c == '}') {
+        body[bodyLen] = '\0';
+        sel[selLen] = '\0';
+        char *s = cssTrimLower(sel);
+        int says = s[0] != '@' ? cssBreakBefore(body) : -1;
+        if (says >= 0) cssAddSelectors(s, says == 1, rules);
+        inBody = false;
+        selLen = 0;
+      } else if (bodyLen + 1 < sizeof(body)) {
+        body[bodyLen++] = c;
+      }
+    }
+  }
+}
+
+bool epubReadBreakRules(const Zip &zip, const EpubInfo &info, std::vector<BreakRule> &rules) {
+  rules.clear();
+  for (uint8_t i = 0; i < info.styleSheetCount; i++) {
+    ZipEntry e;
+    ZipEntryReader r;
+    if (zip.findHash(info.styleSheets[i], e) && r.begin(zip.file(), e)) epubParseBreakRules(r, rules);
+  }
+  return true;
 }

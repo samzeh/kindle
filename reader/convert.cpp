@@ -57,8 +57,11 @@ void XhtmlConverter::put(const char *s, uint32_t n) {
   length_ += n;
 }
 
-void XhtmlConverter::beginFile(const uint32_t *fragments, uint32_t *offsets, uint16_t count) {
+void XhtmlConverter::beginFile(const uint32_t *fragments, uint32_t *offsets, uint16_t count,
+                               const bool *breakAt) {
   breakParagraph();
+  pageBreakNext_ = true;  // each file starts a new page, as on a Kindle
+  breakAt_ = breakAt;
   fragments_ = fragments;
   offsets_ = offsets;
   count_ = count;
@@ -84,6 +87,7 @@ void XhtmlConverter::endFile() {
     if (offsets_[i] == UINT32_MAX) offsets_[i] = next;
   fragments_ = nullptr;
   offsets_ = nullptr;
+  breakAt_ = nullptr;
   count_ = 0;
 }
 
@@ -108,12 +112,19 @@ void XhtmlConverter::breakLine() {
 }
 
 void XhtmlConverter::startParagraph() {
-  if (length_ > 0) put("\n", 1);
+  bool first = length_ == 0;
+  if (!first) put("\n", 1);
   for (uint8_t i = 0; i < pendingCount_; i++) offsets_[pending_[i]] = length_;
   pendingCount_ = 0;
+  if (capturingHeading_) headingOffset_ = length_;
+  if ((pageBreakNext_ || (tocBreakNext_ && textOnPage_)) && !first) {
+    put(&TXT_PAGEBREAK, 1);
+    textOnPage_ = false;
+  }
+  pageBreakNext_ = tocBreakNext_ = false;
+  if (headingDepth_ == 0) textOnPage_ = true;
   if (headingDepth_ > 0) {
     put(&TXT_HEADING, 1);
-    if (capturingHeading_) headingOffset_ = length_ - 1;
   } else if (noIndentNext_) {
     put(&TXT_NOINDENT, 1);
   }
@@ -151,15 +162,19 @@ void XhtmlConverter::startTag(const char *name, const XmlAttrs &a, bool selfClos
   const char *id = a.get("id");
   if (id && count_) {
     uint32_t h = fnv1a(id);
-    for (uint16_t i = 0; i < count_; i++)
-      if (fragments_[i] == h && offsets_[i] == UINT32_MAX && pendingCount_ < MAX_PENDING)
+    for (uint16_t i = 0; i < count_; i++) {
+      if (fragments_[i] == h && offsets_[i] == UINT32_MAX && pendingCount_ < MAX_PENDING) {
         pending_[pendingCount_++] = i;
+        if (breakAt_ && breakAt_[i]) tocBreakNext_ = true;
+      }
+    }
   }
 
   if (shouldSkip(name, a)) {
     if (!selfClosing) skipDepth_ = depth_++;
     return;
   }
+  if (matchesBreakRule(name, a)) pageBreakNext_ = true;
   if (!selfClosing) depth_++;
 
   int level = headingLevel(name);
@@ -194,6 +209,47 @@ void XhtmlConverter::startTag(const char *name, const XmlAttrs &a, bool selfClos
   } else if (!selfClosing && isOneOf(name, ITALIC_TAGS)) {
     if (italicCount_ < MAX_ITALIC) italicAt_[italicCount_++] = depth_;
   }
+}
+
+// Whether the element has the class (fnv1a, lower-cased). The class
+// attribute is a list; compared lower-cased, as the rules are.
+static bool hasClass(const char *cls, uint32_t want) {
+  for (const char *p = cls; p && *p;) {
+    while (*p == ' ') p++;
+    char word[48];
+    size_t n = 0;
+    for (; *p && *p != ' '; p++)
+      if (n + 1 < sizeof(word)) word[n++] = (*p >= 'A' && *p <= 'Z') ? (char)(*p - 'A' + 'a') : *p;
+    if (n && fnv1a((const void *)word, n) == want) return true;
+  }
+  return false;
+}
+
+// True if the element asks for a page break before it: in its own style
+// attribute, or by the most specific CSS rule from the book's stylesheets
+// that matches it (a class outweighs a tag, so ".no-break" can cancel
+// "h2"; between equals, the later rule wins).
+bool XhtmlConverter::matchesBreakRule(const char *name, const XmlAttrs &a) const {
+  const char *style = a.get("style");
+  if (style && (strstr(style, "break-before: always") || strstr(style, "break-before:always") ||
+                strstr(style, "break-before: page") || strstr(style, "break-before:page")))
+    return true;
+  if (!ruleCount_) return false;
+  uint32_t tag = fnv1a(name);
+  const char *cls = a.get("class");
+  int best = -1;
+  bool breaks = false;
+  for (uint16_t r = 0; r < ruleCount_; r++) {
+    const BreakRule &rule = rules_[r];
+    if (rule.tag && rule.tag != tag) continue;
+    if (rule.cls && !hasClass(cls, rule.cls)) continue;
+    int weight = (rule.cls ? 10 : 0) + (rule.tag ? 1 : 0);  // as CSS counts it
+    if (weight >= best) {
+      best = weight;
+      breaks = rule.breaks;
+    }
+  }
+  return breaks;
 }
 
 void XhtmlConverter::endTag(const char *name) {
@@ -240,20 +296,24 @@ void XhtmlConverter::text(uint32_t cp) {
 // ---- Whole book ----
 
 bool convertBook(const Zip &zip, const std::vector<SpineItem> &spine,
-                 const std::vector<TocEntry> &toc, TextSink &out,
-                 std::vector<Chapter> &chapters, void (*progress)(uint8_t, void *), void *ctx) {
+                 const std::vector<TocEntry> &toc, const std::vector<BreakRule> &rules,
+                 TextSink &out, std::vector<Chapter> &chapters,
+                 void (*progress)(uint8_t, void *), void *ctx) {
   XhtmlConverter conv(out);
+  conv.setBreakRules(rules.data(), (uint16_t)rules.size());
   std::vector<uint32_t> tocOffsets(toc.size(), UINT32_MAX);
   std::vector<uint32_t> fragments;
   std::vector<uint32_t> offsets;
   std::vector<uint16_t> which;
+  bool breakAt[256];  // per entry in this file: a top-level chapter
 
   for (uint16_t s = 0; s < spine.size(); s++) {
     // The table-of-contents entries that point into this file.
     fragments.clear();
     which.clear();
     for (uint16_t t = 0; t < toc.size(); t++) {
-      if (toc[t].spine == s) {
+      if (toc[t].spine == s && fragments.size() < sizeof(breakAt)) {
+        breakAt[fragments.size()] = toc[t].depth == 0;
         fragments.push_back(toc[t].fragmentHash);
         which.push_back(t);
       }
@@ -261,7 +321,7 @@ bool convertBook(const Zip &zip, const std::vector<SpineItem> &spine,
     offsets.assign(fragments.size(), UINT32_MAX);
 
     ZipEntryReader reader;
-    conv.beginFile(fragments.data(), offsets.data(), (uint16_t)fragments.size());
+    conv.beginFile(fragments.data(), offsets.data(), (uint16_t)fragments.size(), breakAt);
     bool ok = reader.begin(zip.file(), spine[s].entry) && xmlParse(reader, conv);
     conv.endFile();
     if (!ok || conv.failed()) return false;

@@ -1,0 +1,16 @@
+# Tells GitHub's language statistics what this repository is written in.
+#
+# Third-party code is marked vendored, so it is left out of the count: the
+# miniz and TJpgDec libraries, and Good Display's original demo sketch (whose
+# large image-data header would otherwise dominate).
+reader/miniz.c linguist-vendored
+reader/miniz.h linguist-vendored
+reader/tjpgd.c linguist-vendored
+reader/tjpgd.h linguist-vendored
+reader/tjpgdcnf.h linguist-vendored
+GDEQ0426T82-FT01C_Arduino/** linguist-vendored
+
+# Our headers are C++ (GitHub otherwise guesses C for .h files).
+reader/*.h linguist-language=C++
+simulator/*.h linguist-language=C++
+simulator/shim/*.h linguist-language=C++
