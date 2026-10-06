@@ -153,7 +153,7 @@ static void simKey(char key) {
         printf("'o' ignored: it opens a book from the library, and one is already open.\n");
         break;
       }
-      appTap(126, 80);
+      appTap(126, 100);
       break;
     case 'c':  // reading only: a tap in the middle third raises the control bar
       if (screen != SCREEN_READING) {

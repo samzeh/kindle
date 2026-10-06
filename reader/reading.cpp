@@ -12,6 +12,7 @@
 
 #include "busy.h"
 #include "fonts/FreeSerif8pt7b.h"
+#include "icons.h"
 #include "catalog.h"
 #include "cover.h"
 #include "epd.h"
@@ -261,33 +262,13 @@ const char *readingChapterTitle() {
 
 static const uint16_t INK = 0x0000, PAPER = 0xFFFF;
 
-// A thin "<" chevron, centred on (cx, cy).
-static void drawChevron(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
-  for (int16_t t = 0; t < 2; t++) {  // 2 px thick
-    gfx.drawLine(cx + 4 + t, cy - 8, cx - 4 + t, cy, INK);
-    gfx.drawLine(cx - 4 + t, cy, cx + 4 + t, cy + 8, INK);
-  }
-}
-
-// A small gear, centred on (cx, cy): a ring with eight teeth.
-static void drawGear(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
-  static const int8_t TEETH[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
-                                      { 0, 1 },  { -1, 1 }, { -1, 0 }, { -1, -1 } };
-  for (const auto &t : TEETH) {
-    int16_t r = t[0] && t[1] ? 6 : 8;  // diagonal teeth reach the same distance
-    gfx.fillRect(cx + t[0] * r - 1, cy + t[1] * r - 1, 3, 3, INK);
-  }
-  gfx.fillCircle(cx, cy, 6, INK);
-  gfx.fillCircle(cx, cy, 3, PAPER);
-}
-
 // The top bar: back chevron, the chapter's title (or, before the first
 // chapter, the book's) in the middle, and the settings gear. drawCentredText
 // truncates the title, so a long one cannot run under the icons.
 static void drawTopBar(Adafruit_GFX &gfx) {
   gfx.fillRect(0, 0, SCREEN_W, onCover() ? BAR_H : layout->coverDownTo(BAR_H), PAPER);
-  drawChevron(gfx, 30, BAR_MID);
-  drawGear(gfx, SCREEN_W - 30, BAR_MID);
+  iconChevronLeft(gfx, 30, BAR_MID);
+  iconGear(gfx, SCREEN_W - 30, BAR_MID);
 
   const char *title = readingChapterTitle();
   if (!title[0]) title = catalogBook(currentBook).title;

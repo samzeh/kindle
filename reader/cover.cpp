@@ -349,17 +349,21 @@ void drawCover(Adafruit_GFX &gfx, const BookInfo &book, int16_t x, int16_t y,
       }
     }
     free(art);
-  } else if (w >= COVER_TEXT_MIN_W) {
-    // No cover art, and room enough to letter it: set the title and author
-    // inside the frame instead. Below the legibility floor (e.g. a list-view
-    // thumbnail) the frame is left empty; the caller draws the caption.
-    gfx.setTextColor(INK);
-    gfx.setTextWrap(false);
-    int16_t inset = 10;
-    drawCentredText(gfx, book.title, &FreeSerifBold9pt7b, x + inset,
-                    w - 2 * inset, y + h / 2 - 6);
-    drawCentredText(gfx, book.author, &FreeSerif9pt7b, x + inset,
-                    w - 2 * inset, y + h / 2 + 18);
+  } else {
+    // No cover art: a light grey block (one pixel in four), so the book has
+    // a shape on the shelf. With room to letter it, the title and author go
+    // on a white band across the middle; below the legibility floor the
+    // caller captions it.
+    for (int16_t py = 0; py < h; py += 2)
+      for (int16_t px = 0; px < w; px += 2) gfx.drawPixel(x + px, y + py, INK);
+    if (w >= COVER_TEXT_MIN_W) {
+      gfx.fillRect(x, y + h / 2 - 26, w, 54, PAPER);
+      gfx.setTextColor(INK);
+      gfx.setTextWrap(false);
+      int16_t inset = 10;
+      drawCentredText(gfx, book.title, &FreeSerifBold9pt7b, x + inset, w - 2 * inset, y + h / 2 - 6);
+      drawCentredText(gfx, book.author, &FreeSerif9pt7b, x + inset, w - 2 * inset, y + h / 2 + 18);
+    }
   }
 
   gfx.drawRect(x, y, w, h, INK);
