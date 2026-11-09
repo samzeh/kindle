@@ -19,9 +19,11 @@ it. Needs Pillow (`python3 -m pip install pillow`).
 
 ## make_gfx_font.py
 
-Turns a TrueType font into an Adafruit GFX font header, for sizes the
-library does not ship. Matches Adafruit's fontconvert (141 DPI, ASCII, no
-anti-aliasing). Needs Pillow.
+Turns a TrueType font into an Adafruit GFX font header. Matches Adafruit's
+fontconvert (141 DPI, no anti-aliasing) except for the character range, which
+is the reader's charset, 0x20-0xFF in Windows-1252, rather than ASCII -- so
+curly quotes, dashes and accented letters have glyphs. Needs Pillow.
+Normally run through `make_fonts.sh` rather than directly.
 
     python3 tools/make_gfx_font.py FreeSerif.ttf 8 FreeSerif8pt7b > reader/fonts/FreeSerif8pt7b.h
 
@@ -41,3 +43,21 @@ Kept for reference.
 Turns a cover image into a pre-dithered 1-bit C array (`COVER_PRIDE`), from
 when covers were compiled in. Covers now come from each EPUB and are
 dithered on the device (`reader/cover.cpp`). Kept for reference.
+
+## fetch_fonts.sh
+
+Downloads the GNU FreeFont outlines into `tools/freefont/`, which is where
+`make_fonts.sh` reads them from. They are not committed (a 5.8 MB zip) and are
+only needed when regenerating the font headers. These are the same outlines
+Adafruit generated its own FreeSerif headers from, so the typeface matches.
+
+    sh tools/fetch_fonts.sh
+
+## make_fonts.sh
+
+Regenerates every header in `reader/fonts/`: the seven body sizes the
+font-size setting offers, each in four faces, plus the settings sheet's and
+the page number's. The output is committed, so run this only after changing
+the sizes, the character range or the generator.
+
+    sh tools/make_fonts.sh
