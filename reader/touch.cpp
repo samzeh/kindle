@@ -56,26 +56,29 @@ void touchBegin() {
 static bool wasDown = false;
 
 // Polls the chip over I2C rather than using the INT pin: on this board INT
-// only pulses briefly, so it cannot tell whether a finger is down.
-bool touchGetTap(uint16_t &x, uint16_t &y) {
+// only pulses briefly, so it cannot tell whether a finger is down. Because
+// the position is read fresh on every poll anyway, following a finger costs
+// nothing extra -- the only difference between a tap and a drag is whether
+// the caller is told about the polls after the first one.
+TouchPhase touchPoll(uint16_t &x, uint16_t &y) {
   uint8_t status;
-  if (!readRegs(REG_TD_STATUS, &status, 1)) return false;
+  if (!readRegs(REG_TD_STATUS, &status, 1)) return TOUCH_NONE;
   uint8_t fingers = status & 0x0F;
   bool down = fingers > 0 && fingers <= 2;  // the chip tracks at most 2 points
   if (!down) {
+    // The lift is reported once, so a control can settle when the finger
+    // leaves rather than on every poll while it rests.
+    bool lifted = wasDown;
     wasDown = false;
-    return false;
+    return lifted ? TOUCH_UP : TOUCH_NONE;
   }
 
-  // A tap is the moment the screen goes from untouched to touched; staying
-  // down (or the finger count changing) does not count again.
-  bool isNewPress = !wasDown;
-  wasDown = true;
-  if (!isNewPress) return false;
-
   uint8_t p[4];
-  if (!readRegs(REG_P1_XH, p, 4)) return false;
+  if (!readRegs(REG_P1_XH, p, 4)) return TOUCH_NONE;
   x = ((p[0] & 0x0F) << 8) | p[1];
   y = ((p[2] & 0x0F) << 8) | p[3];
-  return true;
+
+  bool isNewPress = !wasDown;
+  wasDown = true;
+  return isNewPress ? TOUCH_DOWN : TOUCH_MOVE;
 }

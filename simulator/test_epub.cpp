@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "ascii.h"
+#include "charset.h"
 #include "check.h"
 #include "convert.h"
 #include "epub.h"
@@ -15,10 +15,10 @@
 #include "textformat.h"
 #include "textsource.h"
 #include "xml.h"
-#include <Fonts/FreeSerif12pt7b.h>
-#include <Fonts/FreeSerifItalic12pt7b.h>
-#include <Fonts/FreeSerifBold12pt7b.h>
-#include <Fonts/FreeSerifBoldItalic12pt7b.h>
+#include "../reader/fonts/FreeSerif12pt7b.h"
+#include "../reader/fonts/FreeSerifItalic12pt7b.h"
+#include "../reader/fonts/FreeSerifBold12pt7b.h"
+#include "../reader/fonts/FreeSerifBoldItalic12pt7b.h"
 #include "zip.h"
 
 namespace {
@@ -174,21 +174,55 @@ static void testXmlChunking() {
   CHECK_STR(utf.log.c_str(), "<p>caf{233} {8212}</p>");
 }
 
-static void testAscii() {
+static void testCharset() {
   char buf[4];
-  CHECK_EQ(asciiFor('a', buf), 1);
-  CHECK(asciiFor(0x2019, buf) == 1 && buf[0] == '\'');
-  CHECK(asciiFor(0x201C, buf) == 1 && buf[0] == '"');
-  CHECK(asciiFor(0x2014, buf) == 2 && memcmp(buf, "--", 2) == 0);
-  CHECK(asciiFor(0xE9, buf) == 1 && buf[0] == 'e');
-  CHECK(asciiFor(0xE6, buf) == 2 && memcmp(buf, "ae", 2) == 0);
-  CHECK_EQ(asciiFor(0xAD, buf), 0);  // soft hyphen: dropped
-  CHECK(asciiFor(0x4E2D, buf) == 1 && buf[0] == '?');
+  CHECK_EQ(charsetFor('a', buf), 1);
+
+  // Typographic punctuation keeps its own shape now, in the 0x80-0x9F block
+  // Windows-1252 puts it in, rather than being spelled out in ASCII.
+  CHECK(charsetFor(0x2018, buf) == 1 && (uint8_t)buf[0] == 0x91);  // left single
+  CHECK(charsetFor(0x2019, buf) == 1 && (uint8_t)buf[0] == 0x92);  // right single
+  CHECK(charsetFor(0x201C, buf) == 1 && (uint8_t)buf[0] == 0x93);  // left double
+  CHECK(charsetFor(0x201D, buf) == 1 && (uint8_t)buf[0] == 0x94);  // right double
+  CHECK(charsetFor(0x2013, buf) == 1 && (uint8_t)buf[0] == 0x96);  // en dash
+  CHECK(charsetFor(0x2014, buf) == 1 && (uint8_t)buf[0] == 0x97);  // em dash
+  CHECK(charsetFor(0x2026, buf) == 1 && (uint8_t)buf[0] == 0x85);  // ellipsis
+  CHECK(charsetFor(0x2022, buf) == 1 && (uint8_t)buf[0] == 0x95);  // bullet
+  CHECK(charsetFor(0x0152, buf) == 1 && (uint8_t)buf[0] == 0x8C);  // OE
+  CHECK(charsetFor(0x20AC, buf) == 1 && (uint8_t)buf[0] == 0x80);  // euro
+
+  // Latin-1 is itself: accented letters keep their accents.
+  CHECK(charsetFor(0xE9, buf) == 1 && (uint8_t)buf[0] == 0xE9);    // e acute
+  CHECK(charsetFor(0xE6, buf) == 1 && (uint8_t)buf[0] == 0xE6);    // ae
+  CHECK(charsetFor(0xDF, buf) == 1 && (uint8_t)buf[0] == 0xDF);    // sharp s
+  CHECK(charsetFor(0xA9, buf) == 1 && (uint8_t)buf[0] == 0xA9);    // copyright
+
+  // The invisible characters still have to be handled before the charset
+  // claims their byte: a no-break space must become a real space or the words
+  // either side of it would never be split for line breaking.
+  CHECK(charsetFor(0xA0, buf) == 1 && buf[0] == ' ');
+  CHECK_EQ(charsetFor(0xAD, buf), 0);  // soft hyphen: dropped
+  CHECK_EQ(charsetFor(0x200B, buf), 0);
+
+  // Outside the charset: still degrades to a spelling rather than vanishing.
+  CHECK(charsetFor(0x2032, buf) == 1 && buf[0] == '\'');   // prime
+  CHECK(charsetFor(0x2010, buf) == 1 && buf[0] == '-');    // hyphen
+  CHECK(charsetFor(0x010D, buf) == 1 && buf[0] == 'c');    // c caron
+  CHECK(charsetFor(0x4E2D, buf) == 1 && buf[0] == '?');
+
+  // Every byte 0x20-0xFF that the mapping can produce must be one the fonts
+  // have a glyph for; nothing may map into the control range the text format
+  // uses for its own markers (0x01-0x04).
+  for (uint32_t cp = 0x20; cp <= 0x2122; cp++) {
+    uint8_t n = charsetFor(cp, buf);
+    for (uint8_t i = 0; i < n; i++)
+      CHECK((uint8_t)buf[i] >= 0x20 && (uint8_t)buf[i] != 0x7F);
+  }
 
   char out[32];
-  asciiFromUtf8("  \xE2\x80\x9C" "Caf\xC3\xA9\xE2\x80\x9D \n  \xE2\x80\x94 ok  ", out, sizeof(out));
-  CHECK_STR(out, "\"Cafe\" -- ok");
-  asciiFromUtf8("A very long title indeed", out, 7);
+  charsetFromUtf8("  \xE2\x80\x9C" "Caf\xC3\xA9\xE2\x80\x9D \n  \xE2\x80\x94 ok  ", out, sizeof(out));
+  CHECK_STR(out, "\x93" "Caf\xE9\x94 \x97 ok");
+  charsetFromUtf8("A very long title indeed", out, 7);
   CHECK_STR(out, "A very");
 }
 
@@ -283,7 +317,7 @@ static void testConverterExact() {
     "</body></html>");
   const std::string want =
     "\x02Title Line\n"
-    "\x03One \x01two three \x01" "four & \"five\"\n"
+    "\x03One \x01two three \x01" "four & \x93" "five\x94\n"
     "\x01open\x01\n"
     "plain\n"
     "\x01" "a\x01\n\x01" "b\x01\n"
@@ -328,19 +362,28 @@ static void testConvertBook() {
   }
 
   CHECK(s.find("WHEN the sun rose") != std::string::npos);  // drop cap
-  CHECK(s.find("\"early\" & bright -- very bright") != std::string::npos);
-  CHECK(s.find("cafe life") != std::string::npos);
+  // Curly quotes, the em dash and the accent survive into the text now,
+  // as their charset bytes rather than ASCII spellings.
+  CHECK(s.find("\x93" "early\x94 & bright \x97 very bright") != std::string::npos);
+  CHECK(s.find("caf\xE9 life") != std::string::npos);
   CHECK(s.find("[12]") == std::string::npos);          // page number
   CHECK(s.find("LICENCE") == std::string::npos);       // Gutenberg header
   CHECK(s.find("\nSo this one must not be italic.") != std::string::npos);
 
-  // Italics never run past the end of a line, and nothing non-ASCII is left.
+  // Italics never run past the end of a line, and every byte is either one of
+  // the format's markers or a character the fonts can draw. High bytes are
+  // expected now -- they are the charset -- but a byte in the control range
+  // that is not a marker would be a converter bug, and would draw nothing.
   int toggles = 0;
   bool clean = true;
   for (unsigned char c : s) {
     if (c == (unsigned char)TXT_ITALIC) toggles++;
     if (c == '\n' && toggles % 2) clean = false;
-    if (c >= 0x80) clean = false;
+    bool marker = c == (unsigned char)TXT_ITALIC || c == (unsigned char)TXT_HEADING ||
+                  c == (unsigned char)TXT_NOINDENT || c == (unsigned char)TXT_PAGEBREAK ||
+                  c == '\n';
+    if (!marker && c < 0x20) clean = false;
+    if (c == 0x7F) clean = false;
   }
   CHECK(clean);
 
@@ -515,7 +558,7 @@ void runEpubTests() {
   // Storage already points at fixtures/library (tests.cpp's main).
   testZipEntries();
   testXmlChunking();
-  testAscii();
+  testCharset();
   testEpubResolve();
   testEpubPackages();
   testConverterExact();

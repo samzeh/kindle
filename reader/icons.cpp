@@ -39,3 +39,28 @@ void iconList(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
     gfx.fillRect(cx - 4, y, 14, 3, INK);       // the line
   }
 }
+
+void iconSun(Adafruit_GFX &gfx, int16_t cx, int16_t cy, int16_t rays) {
+  // The disc keeps a constant relation to the rays, so the small sun is the
+  // large one scaled rather than a different drawing.
+  int16_t r = rays / 2;
+  gfx.fillCircle(cx, cy, r, INK);
+  // Eight rays, the diagonals pulled in so every ray ends the same distance
+  // from the centre.
+  static const int8_t DIRS[8][2] = { { 0, -1 }, { 1, -1 }, { 1, 0 }, { 1, 1 },
+                                     { 0, 1 },  { -1, 1 }, { -1, 0 }, { -1, -1 } };
+  for (const auto &d : DIRS) {
+    bool diagonal = d[0] && d[1];
+    int16_t inner = diagonal ? (r + 2) * 7 / 10 : r + 2;
+    int16_t outer = diagonal ? rays * 7 / 10 : rays;
+    gfx.drawLine(cx + d[0] * inner, cy + d[1] * inner,
+                 cx + d[0] * outer, cy + d[1] * outer, INK);
+  }
+}
+
+void iconMoon(Adafruit_GFX &gfx, int16_t cx, int16_t cy) {
+  // A filled disc with a second disc punched out of it, offset up and right:
+  // the crescent is what is left.
+  gfx.fillCircle(cx, cy, 9, INK);
+  gfx.fillCircle(cx + 4, cy - 3, 8, PAPER);
+}

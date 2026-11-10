@@ -9,13 +9,14 @@
 #include "cover.h"
 #include "epub.h"
 #include "hash.h"
+#include "prefs.h"
 #include "storage.h"
 #include "zip.h"
 
 // Bump to make every book's cached title, author and cover be re-read.
 static const uint16_t META_VERSION = 2;  // 2: smaller grid covers
 // Bump when convert.cpp's output changes, so texts are converted again.
-static const uint16_t CONVERT_VERSION = 3;  // 3: no-break rules; title pages kept whole
+static const uint16_t CONVERT_VERSION = 4;  // 4: reader charset (cp1252) instead of ASCII
 static const uint32_t META_MAGIC = 0x4D455441;  // "META"
 static const uint32_t TOC_MAGIC = 0x544F4331;   // "TOC1"
 static const uint16_t MAX_BOOKS = 200;
@@ -307,6 +308,13 @@ bool catalogLoadFullCover(const BookInfo &book, GFXcanvas1 &canvas) {
   uint32_t bytes = canvasBytes(canvas);
   bool ok = storageSize(f) == bytes && storageRead(f, canvas.getBuffer(), bytes) == (int32_t)bytes;
   storageClose(f);
+  // Same reason as drawCover's: the screen is inverted on its way to the
+  // panel in dark mode, so the stored cover is flipped here to cancel it and
+  // a cover page stays a picture rather than its negative.
+  if (ok && prefsDarkMode()) {
+    uint8_t *buf = canvas.getBuffer();
+    for (uint32_t i = 0; i < bytes; i++) buf[i] = (uint8_t)~buf[i];
+  }
   return ok;
 }
 

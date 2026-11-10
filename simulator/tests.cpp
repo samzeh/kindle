@@ -12,10 +12,12 @@
 #include "epd.h"
 #include "library.h"
 #include "reading.h"
+#include "prefs.h"
 #include "screens.h"
+#include "settings.h"
 #include "storage.h"
 #include "store.h"
-#include <Fonts/FreeSerifBold9pt7b.h>
+#include "../reader/fonts/FreeSerifBold9pt7b.h"
 
 SerialPort Serial;
 
@@ -23,8 +25,8 @@ void runEpubTests();  // test_epub.cpp
 
 // ---- Stand-ins for the screen driver (reader/epd.h) ----
 void epdBegin() {}
-void epdShowFull(const uint8_t *) {}
-void epdShowPartial(const uint8_t *) {}
+void epdShowFull(const uint8_t *, bool) {}
+void epdShowPartial(const uint8_t *, bool) {}
 void epdSleep() {}
 
 // Saved positions (reader/store.h) come from host_platform.cpp, in memory
@@ -135,7 +137,7 @@ static void testLibraryGridHitTest() {
   CHECK_EQ(libraryPageCount(LIB_VIEW_GRID), 1);  // catalogCount() == 4
 
   // Header, right side: toggles the view.
-  CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
+  CHECK_EQ(libraryHitTest(440, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
   // Header, left side: nothing.
   CHECK_EQ(libraryHitTest(100, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);
 
@@ -172,9 +174,14 @@ static void testLibraryGridHitTest() {
   CHECK_EQ(libraryHitTest(84, 311, 0, LIB_VIEW_GRID).action, LIB_NONE);   // row 1 top edge
   CHECK_EQ(libraryHitTest(84, 312, 0, LIB_VIEW_GRID).book, 3);
   CHECK_EQ(libraryHitTest(100, 59, 0, LIB_VIEW_GRID).action, LIB_NONE);   // header bottom edge
-  CHECK_EQ(libraryHitTest(400, 59, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
-  CHECK_EQ(libraryHitTest(383, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);   // toggle edge
-  CHECK_EQ(libraryHitTest(384, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
+  CHECK_EQ(libraryHitTest(440, 59, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
+  // The header's right side is two adjoining controls: the gear from 356, the
+  // view toggle from 416. Both edges are asserted, since a tap landing one
+  // pixel into the wrong one opens a sheet when a view change was meant.
+  CHECK_EQ(libraryHitTest(355, 20, 0, LIB_VIEW_GRID).action, LIB_NONE);
+  CHECK_EQ(libraryHitTest(356, 20, 0, LIB_VIEW_GRID).action, LIB_OPEN_SETTINGS);
+  CHECK_EQ(libraryHitTest(415, 20, 0, LIB_VIEW_GRID).action, LIB_OPEN_SETTINGS);
+  CHECK_EQ(libraryHitTest(416, 20, 0, LIB_VIEW_GRID).action, LIB_TOGGLE_VIEW);
 
   // (126, 100) is the point the simulator's 'o' key taps. It has to open book 0
   // in *both* views, since the key has no way to know which one is up; the
@@ -213,7 +220,7 @@ static void testLibraryListHitTest() {
   CHECK_EQ(simO.book, 0);
 
   // The header and footer behave the same in both views.
-  CHECK_EQ(libraryHitTest(400, 20, 0, LIB_VIEW_LIST).action, LIB_TOGGLE_VIEW);
+  CHECK_EQ(libraryHitTest(440, 20, 0, LIB_VIEW_LIST).action, LIB_TOGGLE_VIEW);
   CHECK_EQ(libraryHitTest(400, 780, 0, LIB_VIEW_LIST).action, LIB_NEXT_PAGE);
 
   // Four books still fit on one page in list view.
@@ -548,7 +555,7 @@ static void testChapterTitles() {
 // testLibraryGridCaptionsEveryBook, which must stay last.
 static void testListRowPercentRightAligned() {
   hostStoreReset();
-  libraryTap(400, 20);  // header toggle: grid -> list
+  libraryTap(440, 20);  // header toggle: grid -> list
 
   CHECK(readingOpenBook(0));
   readingShow(true);
@@ -581,7 +588,7 @@ static void testListRowPercentRightAligned() {
   CHECK(maxInkX >= 0);            // the label did render something
   CHECK_EQ(maxInkX, 455);         // SCREEN_W(480) - MARGIN_X(24) - 1
 
-  libraryTap(400, 20);  // header toggle: list -> grid, restore state
+  libraryTap(440, 20);  // header toggle: list -> grid, restore state
 }
 
 // Every book in the grid is captioned with its title below its cover,
@@ -661,6 +668,367 @@ static void testLibraryGridRibbon() {
 //
 // Reorder these and the failure will look like a rendering bug and will not be
 // one. A new test that touches the canvas belongs at the end of this group.
+// ---- Display settings ----
+
+// Coordinates below come from settings.cpp's geometry constants: the sheet is
+// x 12-467, y 12-363; the header is y 12-67 and holds only a title; the font
+// track runs x 92-388 at y 142 and the brightness track the same x at y 230,
+// each with a 28 px reach; the dark-mode row runs from y 265 to the grab
+// handle's band, which starts at y 338.
+static void testSettingsHitTest() {
+  // Outside the sheet, in all four directions: dismiss.
+  CHECK_EQ(settingsHitTest(5, 100).hit, HIT_OUTSIDE);
+  CHECK_EQ(settingsHitTest(470, 100).hit, HIT_OUTSIDE);
+  CHECK_EQ(settingsHitTest(240, 11).hit, HIT_OUTSIDE);
+  CHECK_EQ(settingsHitTest(240, 364).hit, HIT_OUTSIDE);
+  CHECK_EQ(settingsHitTest(240, 363).hit != HIT_OUTSIDE, true);  // last row inside
+
+  // The grab handle closes, and it is checked before the dark-mode row so
+  // that the row -- which runs the full width below the divider -- cannot
+  // swallow it. Touching the handle must not toggle dark mode.
+  CHECK_EQ(settingsHitTest(240, 338).hit, HIT_CLOSE);
+  CHECK_EQ(settingsHitTest(240, 363).hit, HIT_CLOSE);
+  CHECK_EQ(settingsHitTest(20, 350).hit, HIT_CLOSE);   // its band is the full width
+  CHECK_EQ(settingsHitTest(240, 337).hit, HIT_DARK);   // the row just above it
+
+  // The header holds only a title now, so none of it does anything -- and
+  // in particular it does not close the sheet, which would make the title
+  // a hidden button.
+  CHECK_EQ(settingsHitTest(60, 40).hit, HIT_NONE);
+  CHECK_EQ(settingsHitTest(240, 40).hit, HIT_NONE);
+  CHECK_EQ(settingsHitTest(440, 40).hit, HIT_NONE);
+
+  // Font size: every dot selects its own index, at its centre.
+  const int16_t dotX[PREFS_FONT_COUNT] = { 92, 141, 190, 240, 289, 338, 388 };
+  for (uint8_t i = 0; i < PREFS_FONT_COUNT; i++) {
+    SettingsHitResult h = settingsHitTest(dotX[i], 142);
+    CHECK_EQ(h.hit, HIT_FONT);
+    CHECK_EQ(h.value, i);
+  }
+  // Between two dots it snaps to the nearer one, and the halfway point is
+  // where it changes over.
+  CHECK_EQ(settingsHitTest(264, 142).value, 3);
+  CHECK_EQ(settingsHitTest(265, 142).value, 4);
+  // Past either end of the track, still inside the row: clamped, not wrapped
+  // and not out of range.
+  CHECK_EQ(settingsHitTest(20, 142).value, 0);
+  CHECK_EQ(settingsHitTest(460, 142).value, PREFS_FONT_COUNT - 1);
+  // The row's own top and bottom edges.
+  CHECK_EQ(settingsHitTest(240, 114).hit, HIT_FONT);
+  CHECK_EQ(settingsHitTest(240, 169).hit, HIT_FONT);
+  CHECK_EQ(settingsHitTest(240, 113).hit, HIT_NONE);
+  CHECK_EQ(settingsHitTest(240, 170).hit, HIT_NONE);
+
+  // Brightness: the ends are exactly 0 and 100, and the middle is half, so
+  // the track cannot be off by a knob's width at either extreme.
+  CHECK_EQ(settingsHitTest(92, 230).hit, HIT_BRIGHTNESS);
+  CHECK_EQ(settingsHitTest(92, 230).value, 0);
+  CHECK_EQ(settingsHitTest(20, 230).value, 0);
+  CHECK_EQ(settingsHitTest(388, 230).value, 100);
+  CHECK_EQ(settingsHitTest(460, 230).value, 100);
+  CHECK_EQ(settingsHitTest(240, 230).value, 50);
+  // Every value the track can report is a whole number of steps, so tapping
+  // the same place twice cannot produce two different numbers.
+  for (int16_t x = 92; x <= 388; x++) {
+    SettingsHitResult h = settingsHitTest(x, 230);
+    CHECK_EQ(h.value % PREFS_BRIGHTNESS_STEP, 0);
+    CHECK(h.value <= 100);
+  }
+
+  // Dark mode is the whole row, not just the switch: the label beside it
+  // means the same thing, and a switch alone is a small target.
+  CHECK_EQ(settingsHitTest(20, 300).hit, HIT_DARK);
+  CHECK_EQ(settingsHitTest(240, 290).hit, HIT_DARK);
+  CHECK_EQ(settingsHitTest(460, 300).hit, HIT_DARK);
+  CHECK_EQ(settingsHitTest(240, 265).hit, HIT_DARK);
+  CHECK_EQ(settingsHitTest(240, 264).hit, HIT_NONE);  // the gap above it
+
+  // Nothing anywhere on the sheet reports a value out of range, whatever
+  // the touch lands on.
+  for (int16_t y = 12; y < 364; y += 7) {
+    for (int16_t x = 12; x < 468; x += 11) {
+      SettingsHitResult h = settingsHitTest(x, y);
+      if (h.hit == HIT_FONT) CHECK(h.value < PREFS_FONT_COUNT);
+      if (h.hit == HIT_BRIGHTNESS) CHECK(h.value <= 100);
+    }
+  }
+}
+
+static void testPrefsFontTable() {
+  const uint8_t saved = prefsFontSize();
+  // Every size has all four faces: a missing italic would silently draw
+  // nothing where a book emphasises a word.
+  uint8_t previous = 0;
+  for (uint8_t i = 0; i < PREFS_FONT_COUNT; i++) {
+    const PageFonts &f = prefsBookFontsAt(i);
+    CHECK(f.regular && f.italic && f.bold && f.boldItalic);
+    CHECK(f.regular != f.italic && f.regular != f.bold);
+    uint8_t pt = prefsFontPoints(i);
+    CHECK(pt > previous);  // strictly ascending, so the slider always grows
+    previous = pt;
+    // Small enough that a page cannot need more lines than PageLayout holds.
+    CHECK(800 / f.regular->yAdvance < 64);
+  }
+  // Out of range is clamped rather than reading past the table.
+  prefsSetFontSize(200);
+  CHECK_EQ(prefsFontSize(), PREFS_FONT_COUNT - 1);
+  prefsSetFontSize(saved);
+}
+
+// The hash in a book's pages.bin must move when, and only when, a setting
+// that changes where lines break moves. Brightness and dark mode changing it
+// would re-count every book for nothing.
+static void testPrefsLayoutKey() {
+  const uint8_t savedFont = prefsFontSize();
+  const uint8_t savedBright = prefsBrightness();
+  const bool savedDark = prefsDarkMode();
+
+  prefsSetFontSize(3);
+  const uint32_t key3 = prefsLayoutKey();
+  prefsSetFontSize(5);
+  CHECK(prefsLayoutKey() != key3);
+  prefsSetFontSize(3);
+  CHECK_EQ(prefsLayoutKey(), key3);  // and it comes back, so it is a function of the value
+
+  // Every size is distinguishable from every other.
+  for (uint8_t i = 0; i < PREFS_FONT_COUNT; i++) {
+    prefsSetFontSize(i);
+    uint32_t a = prefsLayoutKey();
+    for (uint8_t j = i + 1; j < PREFS_FONT_COUNT; j++) {
+      prefsSetFontSize(j);
+      CHECK(prefsLayoutKey() != a);
+    }
+  }
+
+  prefsSetFontSize(3);
+  const uint32_t before = prefsLayoutKey();
+  prefsSetBrightness(10);
+  CHECK_EQ(prefsLayoutKey(), before);
+  prefsSetBrightness(95);
+  CHECK_EQ(prefsLayoutKey(), before);
+  prefsSetDarkMode(!savedDark);
+  CHECK_EQ(prefsLayoutKey(), before);
+  prefsSetDarkMode(savedDark);
+  CHECK_EQ(prefsLayoutKey(), before);
+
+  prefsSetFontSize(savedFont);
+  prefsSetBrightness(savedBright);
+  prefsSetDarkMode(savedDark);
+}
+
+// A setting takes effect the moment it is changed, and is saved when the
+// sheet closes. There is nothing to confirm and nothing to undo.
+static void testSettingsApplyImmediately() {
+  hostStoreReset();
+  prefsSetFontSize(3);
+  prefsSetBrightness(60);
+  prefsSetDarkMode(false);
+
+  settingsOpen();
+  CHECK(settingsIsOpen());
+  settingsTap(388, 142);  // font: the largest
+  settingsTap(388, 230);  // brightness: full
+  settingsTap(240, 290);  // dark mode: on
+  // Already in force, with the sheet still open.
+  CHECK_EQ(prefsFontSize(), PREFS_FONT_COUNT - 1);
+  CHECK_EQ(prefsBrightness(), 100);
+  CHECK_EQ(prefsDarkMode(), true);
+  // But not yet written: 99 is the "never set" fallback coming back, so
+  // sliding a slider across its range costs one flash write, not twenty.
+  CHECK_EQ(storeLoadFontSize(99), 99);
+  CHECK_EQ(storeLoadBrightness(99), 99);
+
+  // Tapping outside closes, saves, and asks for the re-count the font size
+  // earned.
+  SettingsTap r = settingsTap(240, 700);
+  CHECK(r.handled);  // and so the tap never reaches the screen underneath
+  CHECK(r.closed);
+  CHECK(r.relayout);
+  CHECK(!settingsIsOpen());
+  CHECK_EQ(prefsFontSize(), PREFS_FONT_COUNT - 1);
+  CHECK_EQ(storeLoadFontSize(99), PREFS_FONT_COUNT - 1);
+  CHECK_EQ(storeLoadBrightness(99), 100);
+  CHECK_EQ(storeLoadDarkMode(false), true);
+
+  // Closing with only non-pagination settings touched asks for no re-count,
+  // which is what keeps a brightness change from re-paginating a book.
+  settingsOpen();
+  settingsTap(240, 290);  // dark mode back off
+  settingsTap(240, 230);  // brightness to half
+  r = settingsTap(240, 700);
+  CHECK(r.closed);
+  CHECK(!r.relayout);
+  CHECK_EQ(prefsBrightness(), 50);
+  CHECK_EQ(prefsDarkMode(), false);
+
+  // Closing having touched nothing at all is still a clean close.
+  settingsOpen();
+  r = settingsTap(240, 700);
+  CHECK(r.closed);
+  CHECK(!r.relayout);
+
+  prefsSetFontSize(3);
+  prefsSetBrightness(60);
+  prefsSetDarkMode(false);
+  hostStoreReset();
+}
+
+// Sliders follow a finger. The panel is far too slow to redraw per step, so
+// a drag changes the value and asks for exactly one redraw, when the finger
+// lifts -- while the front light, which costs nothing to change, follows all
+// the way.
+static void testSettingsDrag() {
+  hostStoreReset();
+  prefsSetFontSize(3);
+  prefsSetBrightness(60);
+  settingsOpen();
+
+  // Brightness: press on the track, then slide.
+  SettingsTap r = settingsTap(92, 230);
+  CHECK_EQ(prefsBrightness(), 0);
+  CHECK(r.redraw);  // the knob jumps to the press
+  r = settingsDrag(240, 230);
+  CHECK_EQ(prefsBrightness(), 50);  // the light has followed...
+  CHECK(!r.redraw);                 // ...and the panel has not
+  CHECK(r.handled);
+  r = settingsDrag(388, 230);
+  CHECK_EQ(prefsBrightness(), 100);
+  CHECK(!r.redraw);
+  // Straying off the track vertically keeps controlling the slider it
+  // started on, rather than falling through to the row below.
+  r = settingsDrag(240, 300);
+  CHECK_EQ(prefsBrightness(), 50);
+  CHECK_EQ(prefsDarkMode(), false);  // the dark row was NOT toggled
+  r = settingsTouchEnd();
+  CHECK(r.redraw);  // one redraw, at the end
+  CHECK(!r.previewFonts);
+
+  // Font: the same, plus the page behind needs redrawing once at the end.
+  r = settingsTap(92, 142);
+  CHECK_EQ(prefsFontSize(), 0);
+  r = settingsDrag(388, 142);
+  CHECK_EQ(prefsFontSize(), PREFS_FONT_COUNT - 1);
+  CHECK(!r.redraw);  // no re-layout of the book per step either
+  r = settingsTouchEnd();
+  CHECK(r.redraw);
+  CHECK(r.previewFonts);
+
+  // A lift with no drag in progress does nothing, so an ordinary tap
+  // anywhere on the sheet is not followed by a stray redraw.
+  r = settingsTouchEnd();
+  CHECK(!r.redraw);
+
+  // A drag cannot start outside the sheet and reach into it.
+  settingsTap(240, 700);  // closes
+  CHECK(!settingsIsOpen());
+  r = settingsDrag(240, 230);
+  CHECK(!r.handled);
+  CHECK_EQ(prefsBrightness(), 50);  // unchanged by the stray drag
+
+  prefsSetFontSize(3);
+  prefsSetBrightness(60);
+  hostStoreReset();
+}
+
+// How big a book's saved page count is on disk; -1 if it has none.
+static int32_t pagesFileSize(const BookInfo &book) {
+  char path[48];
+  catalogPath(book, "pages.bin", path, sizeof(path));
+  StorageFile *f = storageOpen(path, false);
+  if (!f) return -1;
+  int32_t n = (int32_t)storageSize(f);
+  storageClose(f);
+  return n;
+}
+
+// A previewed font size must leave no trace: not in the saved page count,
+// which a Cancel would otherwise have to undo, and not in the page numbering
+// the reader can still see.
+static void testSettingsPreviewLeavesCacheAlone() {
+  hostStoreReset();
+  prefsSetFontSize(3);
+  CHECK(readingOpenBook(0));
+  const BookInfo &book = catalogBook(0);
+  const uint32_t pagesAt3 = readingPageCount();
+  const int32_t fileAt3 = pagesFileSize(book);
+  CHECK(pagesAt3 > 1);
+  CHECK(fileAt3 > 0);
+
+  // A different size, drawn but not committed.
+  prefsSetFontSize(PREFS_FONT_COUNT - 1);
+  readingPreviewFonts();
+  CHECK_EQ(readingPageCount(), pagesAt3);   // in-memory numbering untouched
+  CHECK_EQ(pagesFileSize(book), fileAt3);   // and nothing written
+
+  // Abandoning the preview leaves the book exactly as it was.
+  prefsSetFontSize(3);
+  readingPreviewFonts();
+  CHECK_EQ(readingPageCount(), pagesAt3);
+  CHECK_EQ(pagesFileSize(book), fileAt3);
+
+  // Committing does change the saved count -- the counterpart, so the test
+  // above is known to be capable of failing.
+  prefsSetFontSize(PREFS_FONT_COUNT - 1);
+  readingRelayout();
+  CHECK(readingPageCount() != pagesAt3);
+  CHECK(pagesFileSize(book) != fileAt3);
+
+  prefsSetFontSize(3);
+  readingRelayout();
+  CHECK_EQ(readingPageCount(), pagesAt3);
+  hostStoreReset();
+}
+
+// Changing font size renumbers every page, so the reader's place is kept by
+// text offset. After the change, the text they were looking at must be on
+// the page they are on.
+static void testFontSizeKeepsReadingPosition() {
+  hostStoreReset();
+  prefsSetFontSize(3);
+  CHECK(readingOpenBook(0));
+
+  // Somewhere in the middle, away from both ends.
+  for (int i = 0; i < 4; i++) readingTurnPage(1);
+  CHECK(readingCurrentPage() > 0);
+
+  for (uint8_t size : { (uint8_t)6, (uint8_t)0, (uint8_t)3 }) {
+    const uint32_t wanted = readingPageOffset(readingCurrentPage());
+    prefsSetFontSize(size);
+    readingRelayout();
+    const uint32_t page = readingCurrentPage();
+    // The page starts at or before the text they were reading...
+    CHECK(readingPageOffset(page) <= wanted);
+    // ...and the next one starts after it, so that text is on this page.
+    if (page + 1 < readingPageCount()) CHECK(readingPageOffset(page + 1) > wanted);
+  }
+
+  // The ends are where clamping goes wrong: the first page stays first, and
+  // the last stays last, rather than landing one past either edge.
+  // The store is cleared first because turning pages above saved a position,
+  // and opening a book resumes from one.
+  hostStoreReset();
+  prefsSetFontSize(3);
+  CHECK(readingOpenBook(0));
+  CHECK_EQ(readingCurrentPage(), 0);
+  prefsSetFontSize(6);
+  readingRelayout();
+  CHECK_EQ(readingCurrentPage(), 0);
+
+  prefsSetFontSize(3);
+  readingRelayout();
+  while (readingCurrentPage() + 1 < readingPageCount()) readingTurnPage(1);
+  const uint32_t lastOffset = readingPageOffset(readingCurrentPage());
+  prefsSetFontSize(0);
+  readingRelayout();
+  CHECK_EQ(readingCurrentPage(), readingPageCount() - 1);
+  CHECK(readingPageOffset(readingCurrentPage()) <= lastOffset ||
+        readingPageCount() > 1);  // still the last page, whatever its number
+
+  prefsSetFontSize(3);
+  readingRelayout();
+  hostStoreReset();
+}
+
 int main() {
   // Every test reads the fixture library, with a fresh cache each run.
   if (system("rm -rf /tmp/reader-tests-cache") != 0) return 1;
@@ -680,6 +1048,9 @@ int main() {
   testLibraryListHitTest();
   testDrawCoverPixels();
   testDrawCoverPlaceholderLegibility();
+  testSettingsHitTest();
+  testPrefsFontTable();
+  testPrefsLayoutKey();
 
   // ---- Below here: shared canvas and screen statics. Order matters. ----
   testReadingProgressPercent();
@@ -690,6 +1061,13 @@ int main() {
   testListRowPercentRightAligned();
   testLibraryGridCaptionsEveryBook();
   testLibraryGridRibbon();
+  // These three change the font size, so they re-paginate the fixture books
+  // and must come after everything that assumes the default size. Each puts
+  // the size back when it is done.
+  testSettingsApplyImmediately();
+  testSettingsDrag();
+  testSettingsPreviewLeavesCacheAlone();
+  testFontSizeKeepsReadingPosition();
 
   runEpubTests();  // EPUB reading (test_epub.cpp): independent of the above
   if (failures) {

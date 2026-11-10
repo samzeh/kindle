@@ -125,6 +125,9 @@ bool storageList(const char *dir, StorageListFn fn, void *ctx) {
 
 static std::map<uint32_t, uint32_t> progress;
 static uint8_t libraryView = 0;
+static uint8_t fontSize = 0xFF;    // 0xFF = never set, so the fallback wins
+static uint8_t brightness = 0xFF;
+static uint8_t darkMode = 0xFF;
 static std::string stateFile;  // "" = memory only
 
 static void stateWrite() {
@@ -132,6 +135,7 @@ static void stateWrite() {
   FILE *f = fopen(stateFile.c_str(), "w");
   if (!f) return;
   fprintf(f, "view %u\n", libraryView);
+  fprintf(f, "display %u %u %u\n", fontSize, brightness, darkMode);
   for (const auto &p : progress) fprintf(f, "%08x %u\n", p.first, p.second);
   fclose(f);
 }
@@ -143,6 +147,7 @@ void hostStoreUseFile(const char *path) {
 void hostStoreReset() {
   progress.clear();
   libraryView = 0;
+  fontSize = brightness = darkMode = 0xFF;
 }
 
 void storeBegin() {
@@ -150,8 +155,15 @@ void storeBegin() {
   if (stateFile.empty()) return;
   FILE *f = fopen(stateFile.c_str(), "r");
   if (!f) return;
-  unsigned view, id, offset;
+  unsigned view, id, offset, font, bright, dark;
   if (fscanf(f, "view %u\n", &view) == 1) libraryView = (uint8_t)view;
+  // Written by a version that had no display settings: the line is absent and
+  // the three keep their "never set" value, so the defaults apply.
+  if (fscanf(f, "display %u %u %u\n", &font, &bright, &dark) == 3) {
+    fontSize = (uint8_t)font;
+    brightness = (uint8_t)bright;
+    darkMode = (uint8_t)dark;
+  }
   while (fscanf(f, "%x %u\n", &id, &offset) == 2) progress[id] = offset;
   fclose(f);
 }
@@ -175,4 +187,46 @@ void storeSaveView(uint8_t view) {
 
 uint8_t storeLoadView() {
   return libraryView;
+}
+
+void storeSaveFontSize(uint8_t index) {
+  fontSize = index;
+  stateWrite();
+}
+
+uint8_t storeLoadFontSize(uint8_t fallback) {
+  return fontSize == 0xFF ? fallback : fontSize;
+}
+
+void storeSaveBrightness(uint8_t percent) {
+  brightness = percent;
+  stateWrite();
+}
+
+uint8_t storeLoadBrightness(uint8_t fallback) {
+  return brightness == 0xFF ? fallback : brightness;
+}
+
+void storeSaveDarkMode(bool on) {
+  darkMode = on ? 1 : 0;
+  stateWrite();
+}
+
+bool storeLoadDarkMode(bool fallback) {
+  return darkMode == 0xFF ? fallback : darkMode != 0;
+}
+
+// ---- Stand-in for the front light (reader/frontlight.h) ----
+// A Mac has no LEDs to dim, so the brightness is only reported. It is still
+// worth printing: it is the one way to see, from the simulator, that a tap on
+// the brightness track reached the setting.
+
+#include "frontlight.h"
+
+void frontlightBegin() {
+  printf("frontlight: ready (no light on a Mac; brightness is only reported)\n");
+}
+
+void frontlightSet(uint8_t percent) {
+  printf("frontlight: %u%%\n", percent);
 }

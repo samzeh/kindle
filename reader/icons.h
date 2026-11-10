@@ -15,3 +15,11 @@ void iconGrid(Adafruit_GFX &gfx, int16_t cx, int16_t cy);
 
 // Three rows, each a dot and a line: switch to the list view.
 void iconList(Adafruit_GFX &gfx, int16_t cx, int16_t cy);
+
+// A sun, for the ends of the brightness track: the same drawing at two sizes,
+// so the pair reads as less light and more light rather than as two symbols.
+// `rays` is how far the rays reach from the centre.
+void iconSun(Adafruit_GFX &gfx, int16_t cx, int16_t cy, int16_t rays);
+
+// A crescent moon: dark mode.
+void iconMoon(Adafruit_GFX &gfx, int16_t cx, int16_t cy);

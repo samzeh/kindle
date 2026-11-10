@@ -1,10 +1,6 @@
 #include "reading.h"
 #include <Adafruit_GFX.h>
-#include <Fonts/FreeSerif12pt7b.h>
-#include <Fonts/FreeSerifItalic12pt7b.h>
-#include <Fonts/FreeSerifBold12pt7b.h>
-#include <Fonts/FreeSerifBoldItalic12pt7b.h>
-#include <Fonts/FreeSerif9pt7b.h>
+#include "fonts/FreeSerif9pt7b.h"
 #include <algorithm>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +13,7 @@
 #include "cover.h"
 #include "epd.h"
 #include "layout.h"
+#include "prefs.h"
 #include "screens.h"
 #include "storage.h"
 #include "store.h"
@@ -45,13 +42,6 @@ static const int16_t PROGRESS_W = SCREEN_W - 2 * PROGRESS_X;
 static const int16_t PROGRESS_Y = SCREEN_H - 12;  // the track's row
 static const uint32_t PAGES_MAGIC = 0x50475331;  // "PGS1"
 
-static const PageFonts fonts = {
-  &FreeSerif12pt7b,
-  &FreeSerifItalic12pt7b,
-  &FreeSerifBold12pt7b,
-  &FreeSerifBoldItalic12pt7b,
-};
-
 static FileText text;
 static PageLayout *layout = nullptr;  // made on first use: it needs the canvas
 static uint16_t currentBook = UINT16_MAX;
@@ -64,11 +54,18 @@ static uint8_t turnsSinceFullRefresh = 0;
 static bool controlsVisible = false;
 
 // pages.bin: this header, then one pagePack'd PagePos per page.
+//
+// layoutKey identifies the display settings the count was made under, as one
+// hash rather than a field per setting (see LayoutInputs in prefs.h). A new
+// pagination-affecting setting therefore needs no change to this struct and
+// no migration: books whose key no longer matches simply re-count when next
+// opened, which is the same path a new book takes.
 struct PagesHeader {
   uint32_t magic;
   uint16_t layoutVersion;
   uint16_t width, height;  // of the page it was counted for
   uint32_t textLength;     // of the text it was counted from
+  uint32_t layoutKey;
   uint32_t count;
 };
 
@@ -80,7 +77,8 @@ static bool loadPages(const BookInfo &book) {
   PagesHeader h;
   bool ok = storageRead(f, &h, sizeof(h)) == (int32_t)sizeof(h) && h.magic == PAGES_MAGIC &&
             h.layoutVersion == LAYOUT_VERSION && h.width == appCanvas().width() &&
-            h.height == appCanvas().height() && h.textLength == text.length() && h.count > 0;
+            h.height == appCanvas().height() && h.textLength == text.length() &&
+            h.layoutKey == prefsLayoutKey() && h.count > 0;
   if (ok) {
     pages.assign(h.count, 0);
     ok = storageRead(f, pages.data(), h.count * 4) == (int32_t)(h.count * 4);
@@ -115,7 +113,8 @@ static void paginate(const BookInfo &book) {
   catalogPath(book, "pages.bin", path, sizeof(path));
   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
   PagesHeader h = { PAGES_MAGIC, LAYOUT_VERSION, (uint16_t)appCanvas().width(),
-                    (uint16_t)appCanvas().height(), text.length(), (uint32_t)pages.size() };
+                    (uint16_t)appCanvas().height(), text.length(), prefsLayoutKey(),
+                    (uint32_t)pages.size() };
   StorageFile *f = storageOpen(tmp, true);
   bool ok = f && storageWrite(f, &h, sizeof(h)) &&
             storageWrite(f, pages.data(), (uint32_t)(pages.size() * 4));
@@ -167,9 +166,22 @@ static uint32_t pageContaining(uint32_t offset) {
   return textPage + coverPage;
 }
 
+// PageLayout holds its fonts by value, so a font-size change needs a new one.
+// Rebuilding is cheap -- it owns no buffers, only the line table it refills on
+// every layoutPage -- and doing it here keeps every caller from having to know
+// when the setting moved.
+static uint8_t layoutFontSize = 0xFF;
+
+static void ensureLayout() {
+  if (layout && layoutFontSize == prefsFontSize()) return;
+  delete layout;
+  layout = new PageLayout(appCanvas(), text, prefsBookFonts());
+  layoutFontSize = prefsFontSize();
+}
+
 bool readingOpenBook(uint16_t index) {
   if (index >= catalogCount()) return false;
-  if (!layout) layout = new PageLayout(appCanvas(), text, fonts);
+  ensureLayout();
   const BookInfo &book = catalogBook(index);
   controlsVisible = false;
   turnsSinceFullRefresh = 0;
@@ -315,6 +327,45 @@ void readingShow(bool fullRefresh) {
                 (unsigned)pageTotal(), millis() - t0, fullRefresh ? "full" : "partial");
 }
 
+// Blanks the top of the page down to `y`, grown so that no line of text is
+// left cut in half by whatever is about to be drawn there. Same mechanism the
+// control bar uses; the settings sheet is a taller version of the same idea.
+void readingClearUnder(int16_t y) {
+  // Nothing to protect on the cover page: it is one picture, with no lines to
+  // cut, and blanking its top would leave half a cover showing beside the
+  // overlay. The overlay paints its own area opaquely, so let it sit on top.
+  if (currentBook == UINT16_MAX || !layout || onCover()) return;
+  appCanvas().fillRect(0, 0, SCREEN_W, layout->coverDownTo(y), PAPER);
+}
+
+// Draws the page the reader is on at whatever font size is set now, without
+// re-counting the book. The stored page count and the in-memory `pages` are
+// both left describing the committed size, so Cancel has nothing to repair
+// and a previewed size can never reach pages.bin. The text offset is what
+// carries over, which is why this looks right at any size.
+void readingPreviewFonts() {
+  if (currentBook == UINT16_MAX || pages.empty() || onCover()) return;
+  ensureLayout();
+  layout->layoutPage(pageStart(currentPage), true);
+  drawProgressLine(appCanvas());
+}
+
+// Commits a font size: re-counts the book and keeps the reader on the same
+// text rather than the same page number, which the new size has renumbered.
+// Only called when the layout key actually moved.
+void readingRelayout() {
+  if (currentBook == UINT16_MAX) return;
+  const BookInfo &book = catalogBook(currentBook);
+  const bool wasCover = onCover();
+  const uint32_t offset = pageOffset(currentPage);
+  ensureLayout();
+  busyShow(book.title, "Counting pages...", 0);
+  paginate(book);
+  // pageContaining already accounts for the cover occupying page 0.
+  currentPage = wasCover ? 0 : pageContaining(offset);
+  turnsSinceFullRefresh = 0;
+}
+
 void readingTurnPage(int delta) {
   if (delta > 0 && currentPage + 1 >= pageTotal()) return;  // last page
   if (delta < 0 && currentPage == 0) return;
@@ -344,7 +395,12 @@ void readingTap(int16_t x, int16_t y) {
       appGoTo(SCREEN_LIBRARY);
       break;
     case READ_OPEN_SETTINGS:
-      Serial.println("reading: settings are not built yet");  // the bar stays up
+      // The bar is up -- it is what was tapped -- but the sheet supersedes it,
+      // and the page strip underneath would otherwise keep showing a page
+      // number that goes stale the moment a font preview re-lays out the text.
+      controlsVisible = false;
+      appOpenSettings();
+      readingShow(false);  // appRefresh draws the sheet over this
       break;
     default: break;
   }

@@ -16,6 +16,7 @@ enum LibraryAction : uint8_t {
   LIB_PREV_PAGE,
   LIB_NEXT_PAGE,
   LIB_TOGGLE_VIEW,
+  LIB_OPEN_SETTINGS,
 };
 
 struct LibraryHit {

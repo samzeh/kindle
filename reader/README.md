@@ -6,9 +6,10 @@ opens on a library of books shown with their covers, in either a cover grid
 or a list with reading progress. Tap a book to read it; in a book, tap the
 left third for the previous page and the right third for the next. While
 reading, the screen shows only the text; tap the middle for the controls: a
-bar with a back chevron, the current chapter's name and a settings gear (no
-settings screen yet), and the page number, counted across the whole book
-("Page 42 of 856").
+bar with a back chevron, the current chapter's name and a settings gear, and
+the page number, counted across the whole book ("Page 42 of 856"). The gear
+(and one in the library's header) opens the display settings: font size,
+front light and dark mode.
 
 On the device, books are `.epub` files in a `books` folder on a microSD
 card (FAT32). In the simulator they are `.epub` files in `simulator/books/`.
@@ -67,6 +68,9 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 | `screens.h` | The list of screens, plus `appGoTo()`, `appRefresh()` and the shared canvas. Adding a screen starts here. |
 | `library.h` / `library.cpp` | The library (home) screen: the cover grid, the list view with progress, and the toggle between them. |
 | `reading.h` / `reading.cpp` | The reading screen: opens and prepares books, counts pages, the controls (back, chapter name, settings, "Page X of Y"), and what a tap does. |
+| `settings.h` / `settings.cpp` | The display settings sheet: font size, brightness and dark mode, drawn over whichever screen is showing. Changes take effect as they are made and are saved when it closes; there is nothing to confirm. |
+| `prefs.h` / `prefs.cpp` | The display settings themselves: their values, their saving, the seven body font sizes, and the hash that tells a book's saved page count whether it is still valid. |
+| `frontlight.h` / `frontlight.cpp` | The front light: PWM on the pin in `board_config.h`. Hardware-only; the simulator stands in for it. |
 | `busy.h` / `busy.cpp` | The "Preparing book..." / "Adding book" progress screen. |
 | `catalog.h` / `catalog.cpp` | The books: finds `.epub` files in `/books`, imports each one's title, author and cover, converts its text when first opened, and manages the cache. |
 | `epub.h` / `epub.cpp` | Reads an EPUB's structure: title, author, cover, reading order and table of contents (EPUB 2 and 3). |
@@ -74,7 +78,7 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 | `textformat.h` | The reader's text format: one paragraph per line, with markers for headings, unindented paragraphs and italics. |
 | `zip.h` / `zip.cpp` | Reads files out of the EPUB (a ZIP file), decompressing as it goes. |
 | `xml.h` / `xml.cpp` | A small streaming XML parser. |
-| `ascii.h` / `ascii.cpp` | Turns curly quotes, dashes and accented letters into plain ASCII, since the fonts have no others. |
+| `charset.h` / `charset.cpp` | Turns Unicode book text into the reader's charset (Windows-1252), which the fonts cover in full. Characters outside it keep their nearest spelling. |
 | `textsource.h` / `textsource.cpp` | Where the layout reads text from: memory, or a file through two 4 KB windows. |
 | `layout.h` / `layout.cpp` | Typesetting: word wrap, justification, paragraph indents, italics and headings. Draws into a picture in memory. |
 | `cover.h` / `cover.cpp` | Covers: decodes a book's JPEG cover once, crops it to fit and dithers it to black and white at two sizes, then draws it from the cache. A title-and-author frame for books without one. |
@@ -85,8 +89,8 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 | `bytes.h` | A stream of bytes (from memory, a file or a ZIP entry), shared by the ZIP, XML and JPEG code. |
 | `board_config.h` | Pin numbers and screen settings (rotation, mirroring, tap direction). The file to edit for a different board. |
 | `epd.h` / `epd.cpp` | Screen driver, based on Good Display's demo code. `epdShowFull()` flashes and clears ghosting (~3.7 s); `epdShowPartial()` updates without flashing (~0.8 s). |
-| `touch.h` / `touch.cpp` | Touch driver. Reports one tap per finger press. |
-| `fonts/` | Font sizes Adafruit GFX does not ship (FreeSerif 8pt, for the page number), made with `tools/make_gfx_font.py`. |
+| `touch.h` / `touch.cpp` | Touch driver. Reports a finger landing, moving and lifting, so the settings sliders can be dragged as well as tapped. |
+| `fonts/` | Every font the reader draws with: the seven body sizes the font-size setting offers, each in four faces, plus the sheet's and the page number's. Made with `tools/make_fonts.sh`, and covering 0x20-0xFF rather than the stock Adafruit fonts' ASCII. |
 | `miniz.c` / `miniz.h` | miniz (MIT), for decompressing EPUB contents; only its decompressor is switched on. |
 | `tjpgd.c` / `tjpgd.h` / `tjpgdcnf.h` | TJpgDec, a small JPEG decoder by ChaN (via Bodmer's TJpg_Decoder), configured for grayscale output. |
 
@@ -101,7 +105,7 @@ holds a whole book in memory. See `catalog.h` for the cache layout.
 3. Open `reader/reader.ino`.
 4. **Tools → Board → esp32 → ESP32 Dev Module**, and **Tools → Port →**
    the board's USB port (e.g. `/dev/cu.usbserial-0001`). The default
-   partition scheme is fine (the program is about 390 KB).
+   partition scheme is fine (the program is about 700 KB, mostly fonts).
 5. Click **Upload**. If it stalls at `Connecting...`, hold the board's BOOT
    button until the upload starts.
 6. Optional: **Tools → Serial Monitor** at **115200** baud shows taps,

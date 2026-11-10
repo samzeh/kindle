@@ -5,7 +5,7 @@
 // is the manifest item with properties="cover-image" (EPUB 3) or the one
 // named by <meta name="cover"> (EPUB 2). The table of contents is the EPUB 3
 // navigation document (<nav epub:type="toc">) if there is one, otherwise the
-// EPUB 2 NCX file. Text is converted to ASCII (see ascii.h).
+// EPUB 2 NCX file. Text is converted to the reader's charset (see charset.h).
 #pragma once
 #include <stdint.h>
 #include <vector>

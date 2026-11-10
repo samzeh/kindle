@@ -50,7 +50,27 @@ opened its text is converted and its pages counted; all of that is kept in
 | `l` | **Inside a book only.** Back to the library (opens the controls, then taps the back chevron) |
 | `o` | **Library only.** Open book 0 (taps its cover in grid view, its row in list view) -- a fixed-point convenience for headless verification, not a general book picker |
 | `c` | **Inside a book only.** Show the controls (chapter name, page number) |
+| `s` | Open the display settings sheet, through the gear that opens it for real: the library's header gear, or the book's control bar |
 | `q` or Esc | Quit |
+
+While the settings sheet is open it takes every key and every click, so
+nothing can happen to the screen behind it:
+
+| Input | Does |
+|---|---|
+| Drag | Slide either slider. Brightness follows your finger (watch the `frontlight:` lines); the screen redraws once, when you let go |
+| `1` - `7` | Pick that font size (taps its dot on the track) |
+| `b` / `B` | Brightness to half / full |
+| `d` | Toggle dark mode |
+| `s` | Close the sheet (taps the page below it) |
+
+There is no Done and no Cancel. A setting takes effect as you change it and is
+saved when the sheet closes. Closing is a tap anywhere outside the sheet, or
+on the grab handle along its bottom edge.
+
+A font size shows immediately in the text behind the sheet, but the book is
+only re-counted once the sheet closes -- so `s7` looks instant, and the
+"Counting pages..." step happens when you dismiss it.
 
 Each key is a tap at fixed coordinates, and the same coordinates mean something
 else on the other screen: `(400, 20)` toggles the view in the library but turns
@@ -78,9 +98,12 @@ To save the screen as an image without opening a window:
 ## What it does and does not test
 
 - **Same as the device:** text layout, fonts, margins, page turns, what taps
-  do, when full refreshes happen.
+  do, when full refreshes happen, the settings sheet, and dark mode (the
+  window inverts where the panel would).
 - **Not tested:** the real screen and touch drivers (`reader/epd.cpp`,
-  `reader/touch.cpp`), hardware timing, and memory limits. Test changes to
+  `reader/touch.cpp`), the front light (`reader/frontlight.cpp` -- the
+  simulator prints a percentage where the device dims an LED), NVS
+  (`reader/store.cpp`), hardware timing, and memory limits. Test changes to
   those on the device.
 
 ## Adding new files
@@ -97,7 +120,7 @@ simulator a stand-in (as `host_platform.cpp` stands in for `storage.h`).
 | File | What it does |
 |---|---|
 | `main.cpp` | Opens the window, turns clicks and keys into taps, and stands in for the screen driver (`epdShowFull`, `epdShowPartial`). |
-| `host_platform.cpp` / `.h` | Stands in for book storage (`reader/storage.h`, a folder of EPUBs plus a cache folder) and saved settings (`reader/store.h`). Shared by the simulator and the tests. |
+| `host_platform.cpp` / `.h` | Stands in for book storage (`reader/storage.h`, a folder of EPUBs plus a cache folder), saved settings (`reader/store.h`) and the front light (`reader/frontlight.h`, which only prints its brightness: a Mac has no LEDs). Shared by the simulator and the tests. |
 | `tests.cpp`, `test_epub.cpp`, `check.h` | The host tests (`make test`). |
 | `epubdump.cpp` | The `epub-dump` tool. |
 | `fixtures/library/` | Small test EPUBs, made by `tools/make_fixture_epubs.py`. |

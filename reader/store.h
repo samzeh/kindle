@@ -13,3 +13,15 @@ void storeSaveProgress(uint32_t bookId, uint32_t offset);
 bool storeLoadProgress(uint32_t bookId, uint32_t &offset);
 void storeSaveView(uint8_t view);   // 0 = grid, 1 = list
 uint8_t storeLoadView();            // 0 (grid) if never set
+
+// The display settings (see prefs.h), written once when the settings sheet
+// closes rather than on every change, so sliding a slider across its range
+// costs one flash write instead of twenty. The defaults are passed in rather
+// than hardcoded here: what a sensible font size is belongs with the font
+// table, not with the key-value store.
+void storeSaveFontSize(uint8_t index);
+uint8_t storeLoadFontSize(uint8_t fallback);
+void storeSaveBrightness(uint8_t percent);
+uint8_t storeLoadBrightness(uint8_t fallback);
+void storeSaveDarkMode(bool on);
+bool storeLoadDarkMode(bool fallback);

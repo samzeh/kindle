@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include "ascii.h"
+#include "charset.h"
 #include "hash.h"
 #include "xml.h"
 
@@ -82,8 +82,8 @@ struct ContainerHandler : XmlHandler {
 
 struct MetadataHandler : XmlHandler {
   EpubInfo &info;
-  AsciiBuilder title, author, identifier;
-  AsciiBuilder *capture = nullptr;
+  CharsetBuilder title, author, identifier;
+  CharsetBuilder *capture = nullptr;
   char coverId[64] = "";
   char ncxId[64] = "";
 
@@ -224,7 +224,7 @@ struct NavHandler : XmlHandler {
   int olDepth = 0;
   char href[EPUB_PATH_MAX] = "";
   char title[48];
-  AsciiBuilder label{ title, sizeof(title) };
+  CharsetBuilder label{ title, sizeof(title) };
   bool inLink = false;
 
   explicit NavHandler(TocBuilder &b) : out(b) {}
@@ -265,7 +265,7 @@ struct NcxHandler : XmlHandler {
   int depth = 0;
   bool inText = false;
   char title[48];
-  AsciiBuilder label{ title, sizeof(title) };
+  CharsetBuilder label{ title, sizeof(title) };
 
   explicit NcxHandler(TocBuilder &b) : out(b) {}
 

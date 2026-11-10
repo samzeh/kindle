@@ -1,8 +1,13 @@
 // Which screen is showing, and the shared frame buffer they all draw into.
 //
 // Adding a screen: add an enum value, add a module with xxxShow/xxxTap, and
-// add a case to each switch in app.cpp. A book settings screen (font,
-// frontlight) is the next one planned.
+// add a case to each switch in app.cpp.
+//
+// Not everything needs to be a screen. The display settings (font size,
+// frontlight, dark mode) are a sheet drawn over whichever screen is showing,
+// because they apply to the device rather than to a book, and because a
+// preview of a font size is only useful with the page still behind it. See
+// settings.h.
 #pragma once
 #include <Adafruit_GFX.h>
 #include <stdint.h>
@@ -22,6 +27,10 @@ void appGoTo(Screen s);
 // cannot fire a tap at coordinates that mean something else on whichever
 // screen happens to be up.
 Screen appCurrentScreen();
+
+// Opens the display settings sheet over whichever screen is showing. The
+// sheet is an overlay, not a Screen: see settings.h.
+void appOpenSettings();
 
 // The one 48 KB buffer every screen draws into. Never allocate another.
 GFXcanvas1 &appCanvas();

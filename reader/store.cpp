@@ -46,3 +46,29 @@ void storeSaveView(uint8_t view) {
 uint8_t storeLoadView() {
   return prefs.getUChar("view", 0);
 }
+
+// Three more keys, well inside the 15-character NVS limit. Each is one entry,
+// written once per Done rather than once per tap.
+void storeSaveFontSize(uint8_t index) {
+  prefs.putUChar("font", index);
+}
+
+uint8_t storeLoadFontSize(uint8_t fallback) {
+  return prefs.getUChar("font", fallback);
+}
+
+void storeSaveBrightness(uint8_t percent) {
+  prefs.putUChar("bright", percent);
+}
+
+uint8_t storeLoadBrightness(uint8_t fallback) {
+  return prefs.getUChar("bright", fallback);
+}
+
+void storeSaveDarkMode(bool on) {
+  prefs.putUChar("dark", on ? 1 : 0);
+}
+
+bool storeLoadDarkMode(bool fallback) {
+  return prefs.getUChar("dark", fallback ? 1 : 0) != 0;
+}
