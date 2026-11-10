@@ -1,10 +1,11 @@
 #include "cover.h"
-#include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerifBold9pt7b.h>
+#include "fonts/FreeSerif9pt7b.h"
+#include "fonts/FreeSerifBold9pt7b.h"
 #include <stdlib.h>
 #include <string.h>
 
 #include "catalog.h"
+#include "prefs.h"
 #include "storage.h"
 #include "tjpgd.h"
 
@@ -330,21 +331,29 @@ static uint8_t *loadCoverBits(const BookInfo &book, bool thumb) {
 
 void drawCover(Adafruit_GFX &gfx, const BookInfo &book, int16_t x, int16_t y,
                int16_t w, int16_t h) {
-  gfx.fillRect(x, y, w, h, PAPER);
+  // In dark mode the whole screen is inverted on its way to the panel
+  // (writeImage in epd.cpp), which would turn every cover into a photographic
+  // negative. Drawing the art inverted here cancels that, so a cover looks
+  // like itself in both modes. The frame and the placeholder follow suit, so
+  // the cell reads the same way round as everything else on the screen.
+  const bool dark = prefsDarkMode();
+  const uint16_t fg = dark ? PAPER : INK;
+  const uint16_t bg = dark ? INK : PAPER;
+  gfx.fillRect(x, y, w, h, bg);
 
   bool thumb = w <= THUMB_W;
   uint8_t *art = book.hasCover ? loadCoverBits(book, thumb) : nullptr;
   if (art) {
     int16_t sw = thumb ? THUMB_W : COVER_W, sh = thumb ? THUMB_H : COVER_H;
     if (w == sw && h == sh) {
-      gfx.drawBitmap(x, y, art, w, h, INK);
+      gfx.drawBitmap(x, y, art, w, h, fg);
     } else {  // any other size: nearest-neighbour from the closer one
       int16_t rowBytes = (sw + 7) / 8;
       for (int16_t py = 0; py < h; py++) {
         int16_t sy = coverSrcIndex(py, h, sh);
         for (int16_t px = 0; px < w; px++) {
           int16_t sx = coverSrcIndex(px, w, sw);
-          if (art[sy * rowBytes + sx / 8] & (0x80 >> (sx % 8))) gfx.drawPixel(x + px, y + py, INK);
+          if (art[sy * rowBytes + sx / 8] & (0x80 >> (sx % 8))) gfx.drawPixel(x + px, y + py, fg);
         }
       }
     }
@@ -355,10 +364,10 @@ void drawCover(Adafruit_GFX &gfx, const BookInfo &book, int16_t x, int16_t y,
     // on a white band across the middle; below the legibility floor the
     // caller captions it.
     for (int16_t py = 0; py < h; py += 2)
-      for (int16_t px = 0; px < w; px += 2) gfx.drawPixel(x + px, y + py, INK);
+      for (int16_t px = 0; px < w; px += 2) gfx.drawPixel(x + px, y + py, fg);
     if (w >= COVER_TEXT_MIN_W) {
-      gfx.fillRect(x, y + h / 2 - 26, w, 54, PAPER);
-      gfx.setTextColor(INK);
+      gfx.fillRect(x, y + h / 2 - 26, w, 54, bg);
+      gfx.setTextColor(fg);
       gfx.setTextWrap(false);
       int16_t inset = 10;
       drawCentredText(gfx, book.title, &FreeSerifBold9pt7b, x + inset, w - 2 * inset, y + h / 2 - 6);
@@ -366,5 +375,5 @@ void drawCover(Adafruit_GFX &gfx, const BookInfo &book, int16_t x, int16_t y,
     }
   }
 
-  gfx.drawRect(x, y, w, h, INK);
+  gfx.drawRect(x, y, w, h, fg);
 }

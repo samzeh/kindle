@@ -37,6 +37,7 @@
 #include "epd.h"
 #include "host_platform.h"
 #include "screens.h"
+#include "settings.h"
 
 SerialPort Serial;
 
@@ -79,13 +80,16 @@ static void showSolid(uint32_t color, uint32_t ms) {
   SDL_Delay(ms);
 }
 
-static void showImage(const uint8_t *image) {
+// `invert` is dark mode, applied exactly where the device applies it: on the
+// way to the panel, not in the canvas (see writeImage in reader/epd.cpp).
+static void showImage(const uint8_t *image, bool invert) {
   const int rowBytes = EPD_NATIVE_WIDTH / 8;
   for (int y = 0; y < SCREEN_H; y++) {
     for (int x = 0; x < SCREEN_W; x++) {
       int nx, ny;
       toNative(x, y, nx, ny);
       bool white = image[ny * rowBytes + nx / 8] & (0x80 >> (nx % 8));
+      if (invert) white = !white;
       pixels[y * SCREEN_W + x] = white ? PAPER : INK;
     }
   }
@@ -96,15 +100,15 @@ static void showImage(const uint8_t *image) {
 
 void epdBegin() {}
 
-void epdShowFull(const uint8_t *image) {
+void epdShowFull(const uint8_t *image, bool invert) {
   printf("screen: full refresh (the device flashes here)\n");
   showSolid(INK, FLASH_MS);
   showSolid(PAPER, FLASH_MS);
-  showImage(image);
+  showImage(image, invert);
 }
 
-void epdShowPartial(const uint8_t *image) {
-  showImage(image);
+void epdShowPartial(const uint8_t *image, bool invert) {
+  showImage(image, invert);
 }
 
 void epdSleep() {}
@@ -117,22 +121,64 @@ void epdSleep() {}
 // (and 'n') turn the page forward; 'p' turns it back.
 //
 // Each key stands for a tap at fixed coordinates, and the same coordinates
-// mean different things on different screens: (400, 20) toggles the library
+// mean different things on different screens: (440, 20) toggles the library
 // view but turns the page inside a book, and a list row is hit anywhere across
 // its width where a grid cell is not. So a key that only makes sense on one
 // screen is ignored on the other rather than firing a tap that quietly does
 // something else -- with no board to hand, the simulator is the only evidence
 // a change to the reader has, and a screenshot whose caption is wrong is worse
 // than no screenshot.
+//
+// The settings sheet is a third state on top of the two screens, so its keys
+// are gated on the sheet rather than on the screen, and the screens' keys are
+// gated on the sheet being closed -- including the page turn that every
+// unrecognised character falls through to, which would otherwise turn a page
+// behind the sheet.
 static void simKey(char key) {
   const Screen screen = appCurrentScreen();
+
+  if (settingsIsOpen()) {
+    // Coordinates from settings.cpp: the font track runs x 92-388 at y 142,
+    // brightness the same x at y 230, and the dark row below y 265. The
+    // sheet ends at y 331, so anything below that is outside it.
+    //
+    // Keys tap; they cannot drag. Dragging a slider is a mouse gesture in
+    // the window, and the only part of it that keys could not already reach
+    // is how it feels, which a screenshot would not show anyway.
+    if (key >= '1' && key <= '7') {
+      int16_t i = key - '1';
+      appTap((uint16_t)(92 + 296 * i / 6), 142);
+      return;
+    }
+    switch (key) {
+      case 'b': appTap(240, 230); return;  // brightness: middle of the track
+      case 'B': appTap(388, 230); return;  // brightness: full
+      case 'd': appTap(240, 290); return;  // toggle dark mode
+      case 's': appTap(240, 600); return;  // outside the sheet: close and save
+      default:
+        printf("'%c' ignored: the settings sheet is open "
+               "(1-7 font size, b/B brightness, d dark mode, s to close).\n", key);
+        return;
+    }
+  }
+
   switch (key) {
-    case 'v':  // library only: inside a book, (400, 20) turns the page
+    case 's':
+      // Opened the way a finger opens it, through the real gear, so the key
+      // exercises the entry point rather than a back door.
+      if (screen == SCREEN_LIBRARY) {
+        appTap(380, 20);  // the library header's gear (x 356-415)
+      } else {
+        appTap(240, 400);  // middle third: raise the control bar
+        appTap(440, 20);   // its gear (x >= 416)
+      }
+      break;
+    case 'v':  // library only: inside a book, (440, 20) turns the page
       if (screen != SCREEN_LIBRARY) {
         printf("'v' ignored: it toggles the library view, and a book is open.\n");
         break;
       }
-      appTap(400, 20);
+      appTap(440, 20);
       break;
     case 'l':  // reading only: in the library's list view, (240, 400) opens a book
       if (screen != SCREEN_READING) {
@@ -236,12 +282,25 @@ int main(int argc, char **argv) {
   while (SDL_WaitEvent(&event)) {
     if (event.type == SDL_QUIT) break;
     if (event.type == SDL_WINDOWEVENT) redraw();
+    // The mouse stands in for a finger: press, drag with the button held,
+    // release. The device gets the same three from touchPoll, so dragging a
+    // slider can be tried here even though the panel's own lag cannot be.
     if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
       int x = event.button.x, y = event.button.y;
       if (x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) continue;
       // Convert to raw touch coordinates, as the touch chip would report them.
       if (TOUCH_FLIP_X) x = TOUCH_WIDTH - 1 - x;
       appTap((uint16_t)x, (uint16_t)y);
+    }
+    if (event.type == SDL_MOUSEMOTION && (event.motion.state & SDL_BUTTON_LMASK)) {
+      int x = event.motion.x, y = event.motion.y;
+      if (x < 0) x = 0;
+      if (x >= SCREEN_W) x = SCREEN_W - 1;
+      if (TOUCH_FLIP_X) x = TOUCH_WIDTH - 1 - x;
+      appDrag((uint16_t)x, (uint16_t)(y < 0 ? 0 : y));
+    }
+    if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+      appTouchEnd();
     }
     if (event.type == SDL_KEYDOWN) {
       switch (event.key.keysym.sym) {
@@ -251,6 +310,12 @@ int main(int argc, char **argv) {
         case SDLK_l: simKey('l'); break;
         case SDLK_o: simKey('o'); break;
         case SDLK_c: simKey('c'); break;
+        case SDLK_s: simKey('s'); break;
+        case SDLK_b: simKey(SDL_GetModState() & KMOD_SHIFT ? 'B' : 'b'); break;
+        case SDLK_d: simKey('d'); break;
+        case SDLK_1: case SDLK_2: case SDLK_3: case SDLK_4:
+        case SDLK_5: case SDLK_6: case SDLK_7:
+          simKey((char)('1' + (event.key.keysym.sym - SDLK_1))); break;
         case SDLK_ESCAPE: case SDLK_q: goto quit;
       }
     }

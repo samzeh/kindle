@@ -1,9 +1,9 @@
 #include "library.h"
 #include <Adafruit_GFX.h>
-#include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerif12pt7b.h>
-#include <Fonts/FreeSerifBold12pt7b.h>
-#include <Fonts/FreeSerifBold18pt7b.h>
+#include "fonts/FreeSerif9pt7b.h"
+#include "fonts/FreeSerif12pt7b.h"
+#include "fonts/FreeSerifBold12pt7b.h"
+#include "fonts/FreeSerifBold18pt7b.h"
 #include <stdio.h>  // snprintf, for the footer and list progress labels
 #include <string.h>
 
@@ -27,7 +27,11 @@ static const int16_t MARGIN_X = 24;
 static const int16_t HEADER_MID = 42;
 static const int16_t HEADER_H = 60;
 static const int16_t BODY_BOTTOM = 760;
-static const int16_t TOGGLE_X = 384;  // header, x >= this toggles the view
+// The header's two controls, right-aligned: the view toggle on the end, the
+// settings gear beside it. Their tap zones meet, so every pixel of the right
+// side of the header does something.
+static const int16_t TOGGLE_X = 416;  // header, x >= this toggles the view
+static const int16_t GEAR_X = 356;    // header, GEAR_X <= x < TOGGLE_X opens settings
 static const int16_t FOOTER_MID = SCREEN_H - 20;
 
 // Grid: three columns of COVER_W covers, spread across the text margins,
@@ -104,7 +108,9 @@ static LibraryHit listHitTest(int16_t x, int16_t y, uint8_t p) {
 
 LibraryHit libraryHitTest(int16_t x, int16_t y, uint8_t p, uint8_t v) {
   if (y < HEADER_H) {
-    return x >= TOGGLE_X ? LibraryHit{ LIB_TOGGLE_VIEW, 0 } : LibraryHit{ LIB_NONE, 0 };
+    if (x >= TOGGLE_X) return { LIB_TOGGLE_VIEW, 0 };
+    if (x >= GEAR_X) return { LIB_OPEN_SETTINGS, 0 };
+    return { LIB_NONE, 0 };
   }
   if (y >= BODY_BOTTOM) {
     if (x < SCREEN_W / 3) return { LIB_PREV_PAGE, 0 };
@@ -130,6 +136,9 @@ static void drawHeader(Adafruit_GFX &gfx) {
   int16_t iconX = SCREEN_W - MARGIN_X - 10;
   if (view == LIB_VIEW_GRID) iconList(gfx, iconX, HEADER_MID);
   else iconGrid(gfx, iconX, HEADER_MID);
+  // The display settings reach the library too: brightness and dark mode are
+  // worth changing without first opening a book.
+  iconGear(gfx, iconX - 56, HEADER_MID);
 }
 
 // "1 / 2", with chevrons for the pages either side.
@@ -325,6 +334,10 @@ void libraryTap(int16_t x, int16_t y) {
       storeSaveView(view);
       page = 0;
       libraryShow(false);
+      break;
+    case LIB_OPEN_SETTINGS:
+      appOpenSettings();
+      libraryShow(false);  // appRefresh draws the sheet over this
       break;
     default: break;
   }
