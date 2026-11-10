@@ -30,6 +30,11 @@ void loop() {
   }
 
   uint16_t x, y;
-  if (touchGetTap(x, y)) appTap(x, y);
+  switch (touchPoll(x, y)) {
+    case TOUCH_DOWN: appTap(x, y); break;
+    case TOUCH_MOVE: appDrag(x, y); break;
+    case TOUCH_UP: appTouchEnd(); break;
+    case TOUCH_NONE: break;
+  }
   delay(10);
 }
