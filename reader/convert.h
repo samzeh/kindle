@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <vector>
 
-#include "ascii.h"
+#include "charset.h"
 #include "epub.h"
 #include "xml.h"
 
@@ -106,7 +106,7 @@ private:
   uint8_t pendingCount_ = 0;
 
   char headingTitle_[48];
-  AsciiBuilder headingBuilder_{ headingTitle_, sizeof(headingTitle_) };
+  CharsetBuilder headingBuilder_{ headingTitle_, sizeof(headingTitle_) };
   bool capturingHeading_ = false;
   uint32_t headingOffset_ = 0;
 };

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <string.h>
 
-#include "ascii.h"
+#include "charset.h"
 #include "hash.h"
 #include "textformat.h"
 
@@ -280,7 +280,7 @@ void XhtmlConverter::endTag(const char *name) {
 void XhtmlConverter::text(uint32_t cp) {
   if (skipDepth_ >= 0) return;
   char buf[4];
-  uint8_t n = asciiFor(cp, buf);
+  uint8_t n = charsetFor(cp, buf);
   if (n == 0) return;
 
   if (capturingHeading_) headingBuilder_.add(cp);

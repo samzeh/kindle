@@ -1,8 +1,8 @@
 #include "busy.h"
 
 #include <Adafruit_GFX.h>
-#include <Fonts/FreeSerif9pt7b.h>
-#include <Fonts/FreeSerifBold12pt7b.h>
+#include "fonts/FreeSerif9pt7b.h"
+#include "fonts/FreeSerifBold12pt7b.h"
 
 #include "cover.h"
 #include "epd.h"
