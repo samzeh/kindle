@@ -6,8 +6,10 @@
 #include "catalog.h"
 #include "epd.h"
 #include "library.h"
+#include "prefs.h"
 #include "reading.h"
 #include "screens.h"
+#include "settings.h"
 #include "storage.h"
 #include "store.h"
 
@@ -22,8 +24,14 @@ GFXcanvas1 &appCanvas() {
 
 void appRefresh(bool full) {
   static bool panelReady = false;
-  if (full || !panelReady) epdShowFull(canvas.getBuffer());
-  else epdShowPartial(canvas.getBuffer());
+  if (settingsIsOpen()) {
+    if (current == SCREEN_READING) readingClearUnder(settingsSheetBottom());
+    settingsDraw(canvas);
+  }
+
+  const bool invert = prefsDarkMode();
+  if (full || !panelReady) epdShowFull(canvas.getBuffer(), invert);
+  else epdShowPartial(canvas.getBuffer(), invert);
   panelReady = true;
 }
 
@@ -52,6 +60,7 @@ static void onImportProgress(uint16_t done, uint16_t total, const char *name, vo
 
 void appBegin() {
   storeBegin();
+  prefsBegin();
   canvas.setRotation(SCREEN_ROTATION);
   if (storageBegin()) catalogScan(onImportProgress, nullptr);
   else Serial.println("app: no book storage; the library will be empty");
@@ -68,14 +77,41 @@ void appTurnPage(int delta) {
   }
 }
 
-// Taps arrive in raw touch coordinates. Normalise once here, so every screen
-// hit-tests in plain 480 x 800 screen space.
+void appOpenSettings() {
+  settingsOpen();
+}
+
+static void applySettingsTouch(const SettingsTap &t) {
+  if (t.previewFonts) readingPreviewFonts();  // does nothing off the reading screen
+  if (t.relayout) readingRelayout();
+  if (t.closed) {
+    showCurrent(t.fullRefresh);  // the sheet has gone: the screen fills its space
+  } else if (t.redraw || t.fullRefresh) {
+    appRefresh(t.fullRefresh);   // the sheet repaints its own area
+  }
+}
+
 void appTap(uint16_t rawX, uint16_t rawY) {
   int16_t x = TOUCH_FLIP_X ? (int16_t)(TOUCH_WIDTH - 1 - rawX) : (int16_t)rawX;
   int16_t y = (int16_t)rawY;
   Serial.printf("tap at %d,%d\n", x, y);
+  if (settingsIsOpen()) {
+    applySettingsTouch(settingsTap(x, y));
+    return;
+  }
   switch (current) {
     case SCREEN_LIBRARY: libraryTap(x, y); break;
     case SCREEN_READING: readingTap(x, y); break;
   }
+}
+
+void appDrag(uint16_t rawX, uint16_t rawY) {
+  if (!settingsIsOpen()) return;
+  int16_t x = TOUCH_FLIP_X ? (int16_t)(TOUCH_WIDTH - 1 - rawX) : (int16_t)rawX;
+  applySettingsTouch(settingsDrag(x, (int16_t)rawY));
+}
+
+void appTouchEnd() {
+  if (!settingsIsOpen()) return;
+  applySettingsTouch(settingsTouchEnd());
 }

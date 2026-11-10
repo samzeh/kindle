@@ -12,6 +12,8 @@ void appBegin();
 
 // A tap at raw touch-panel coordinates.
 void appTap(uint16_t x, uint16_t y);
+void appDrag(uint16_t x, uint16_t y);
+void appTouchEnd();
 
 // +1 = next page, -1 = previous page.
 void appTurnPage(int delta);
