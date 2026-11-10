@@ -13,7 +13,7 @@ LDLIBS := $(shell sdl2-config --libs)
 # except the hardware drivers: main.cpp stands in for those. A new reader file
 # that talks to hardware (e.g. an SD card driver) belongs on this list too,
 # with a stand-in added to main.cpp.
-HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp $(READER)/storage_sd.cpp
+HARDWARE_ONLY := $(READER)/epd.cpp $(READER)/touch.cpp $(READER)/store.cpp $(READER)/storage_sd.cpp $(READER)/frontlight.cpp
 READER_SOURCES := $(filter-out $(HARDWARE_ONLY),$(wildcard $(READER)/*.cpp))
 
 # C files in reader/ (the JPEG decoder) are compiled as C, into obj/.
@@ -40,7 +40,7 @@ reader-tests: tests.cpp test_epub.cpp host_platform.cpp $(READER_SOURCES) $(READ
 	$(CXX) $(TESTFLAGS) tests.cpp test_epub.cpp host_platform.cpp $(READER_SOURCES) $(READER_C_OBJECTS) $(GFX)/Adafruit_GFX.cpp -o $@
 
 # Prints what the reader makes of an EPUB: ./epub-dump book.epub [--text]
-EPUB_SOURCES := $(READER)/zip.cpp $(READER)/xml.cpp $(READER)/ascii.cpp $(READER)/epub.cpp $(READER)/convert.cpp
+EPUB_SOURCES := $(READER)/zip.cpp $(READER)/xml.cpp $(READER)/charset.cpp $(READER)/epub.cpp $(READER)/convert.cpp
 
 epub-dump: epubdump.cpp host_platform.cpp $(EPUB_SOURCES) $(READER_C_OBJECTS) $(HEADERS)
 	$(CXX) $(TESTFLAGS) epubdump.cpp host_platform.cpp $(EPUB_SOURCES) $(READER_C_OBJECTS) -o $@

@@ -45,12 +45,16 @@ static void writeData(uint8_t data) {
 }
 
 // CS is toggled for every byte, as in the vendor demo.
-static void writeImage(uint8_t ramCommand, const uint8_t *image) {
+// Dark mode inverts here rather than in the canvas: this loop already touches
+// every byte on its way to the panel, so the XOR is free, and the 48 KB buffer
+// is never copied or modified. Every screen inverts together, by construction.
+static void writeImage(uint8_t ramCommand, const uint8_t *image, bool invert = false) {
   const uint16_t rowBytes = EPD_NATIVE_WIDTH / 8;
+  const uint8_t mask = invert ? 0xFF : 0x00;
   writeCommand(ramCommand);
   for (uint16_t r = 0; r < EPD_NATIVE_HEIGHT; r++) {
     uint16_t row = EPD_FLIP_ROWS ? EPD_NATIVE_HEIGHT - 1 - r : r;
-    for (uint16_t b = 0; b < rowBytes; b++) writeData(image[row * rowBytes + b]);
+    for (uint16_t b = 0; b < rowBytes; b++) writeData(image[row * rowBytes + b] ^ mask);
   }
 }
 
@@ -284,13 +288,13 @@ void epdBegin() {
   pinMode(PIN_EPD_SCK, OUTPUT);
 }
 
-void epdShowFull(const uint8_t *image) {
+void epdShowFull(const uint8_t *image, bool invert) {
   initController();
   // Both RAMs get the image: 0x24 is what to show, 0x26 is what the next
   // partial refresh will compare against.
-  writeImage(0x24, image);
+  writeImage(0x24, image, invert);
   setFullWindow();
-  writeImage(0x26, image);
+  writeImage(0x26, image, invert);
 
   int temp = readTemperature();
   if (temp <= 5) writeLut(LUT_0_5);
@@ -308,7 +312,7 @@ void epdShowFull(const uint8_t *image) {
   Serial.printf("epd: full refresh %lu ms, panel temperature %d C\n", millis() - start, temp);
 }
 
-void epdShowPartial(const uint8_t *image) {
+void epdShowPartial(const uint8_t *image, bool invert) {
   // Same preamble as the vendor demo's partial update. The reset keeps the
   // controller's image RAM, so 0x26 still holds the previous page.
   hardwareReset();
@@ -317,7 +321,7 @@ void epdShowPartial(const uint8_t *image) {
   writeCommand(0x3C);  // border: keep as is
   writeData(0x80);
   setFullWindow();
-  writeImage(0x24, image);
+  writeImage(0x24, image, invert);
 
   writeCommand(0x22);  // partial update (panel's built-in waveform)
   writeData(0xFF);
@@ -328,7 +332,7 @@ void epdShowPartial(const uint8_t *image) {
 
   // Now on screen: store it as the "previous" image for the next update.
   setFullWindow();
-  writeImage(0x26, image);
+  writeImage(0x26, image, invert);
 }
 
 void epdSleep() {

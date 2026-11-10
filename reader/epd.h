@@ -14,11 +14,11 @@ void epdBegin();
 
 // Flashing refresh (~2 s). Clears ghosting; also required before the first
 // partial refresh so the controller knows what is currently on screen.
-void epdShowFull(const uint8_t *image);
+void epdShowFull(const uint8_t *image, bool invert = false);
 
 // Non-flashing refresh that only changes pixels that differ from the
 // previous image. Leaves slight ghosting over time.
-void epdShowPartial(const uint8_t *image);
+void epdShowPartial(const uint8_t *image, bool invert = false);
 
 // Low-power mode. The image stays on screen; call epdShowFull() to wake.
 void epdSleep();
